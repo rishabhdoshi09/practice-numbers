@@ -6,6 +6,8 @@ from __future__ import annotations
 import json
 import logging
 import os
+import warnings
+warnings.filterwarnings("ignore", category=UserWarning, module="statsmodels")
 from contextlib import asynccontextmanager
 from dotenv import load_dotenv
 

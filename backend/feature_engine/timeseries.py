@@ -13,7 +13,8 @@ from backend.config import (
 )
 
 logger = logging.getLogger(__name__)
-warnings.filterwarnings("ignore")   # suppress convergence noise in prod logs
+warnings.filterwarnings("ignore")
+warnings.filterwarnings("ignore", category=UserWarning, module="statsmodels")
 
 
 def fit_arima(close: pd.Series) -> dict:
