@@ -90,6 +90,10 @@ def load_instruments(kite, force: bool = False) -> dict[str, int]:
                     token = inst.get("instrument_token")
                     if not ts or not token:
                         continue
+                    # Exclude SGBs (62RJ27-SG), NCDs (627PFCL27-N0), govt bonds —
+                    # genuine equity symbols always start with a letter
+                    if ts[0].isdigit():
+                        continue
                     sym = f"{ts}.NS"
                     new_tokens[sym] = token
                     new_meta[sym]   = {
@@ -133,6 +137,8 @@ def load_instruments(kite, force: bool = False) -> dict[str, int]:
                     ts    = inst.get("tradingsymbol", "")
                     token = inst.get("instrument_token")
                     if not ts or not token:
+                        continue
+                    if ts[0].isdigit():
                         continue
                     sym = f"{ts}.BO"
                     new_bse[sym] = token
