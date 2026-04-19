@@ -420,6 +420,142 @@ async def daily_report(
     return report
 
 
+# ── 5-Stage Autonomous Investment Pipeline ─────────────────────────────────────
+
+@app.get("/invest/pipeline", tags=["invest"])
+async def run_investment_pipeline(
+    capital: int = Query(default=500_000, ge=10_000, description="Total capital in INR"),
+    symbols: str  = Query(default="",    description="Comma-separated override (default: Nifty 50)"),
+):
+    """
+    Run the full 5-stage autonomous investment pipeline.
+
+    Stage 1 — Screen: Score all Nifty 50 stocks via 8-engine quant analysis.
+    Stage 2 — Adversarial: Bull vs Bear debate for top 5 candidates.
+    Stage 3 — Scenario Modeling: Bull/Base/Bear price targets at 1m/3m/6m/12m.
+    Stage 4 — Portfolio Construction: Markowitz max-Sharpe with sector constraints.
+    Stage 5 — Rebalancing: Compare vs existing portfolio; recommend swaps/sells.
+    """
+    from datetime import datetime as _dt
+    from backend.scanner.universe import NIFTY50_SYMBOLS
+    from backend.scanner.adversarial import run_adversarial
+    from backend.scanner.scenarios import build_scenarios
+    from backend.scanner.portfolio_builder import build_portfolio
+    from backend.scanner.rebalancer import generate_rebalance_plan
+
+    sym_list = [s.strip() for s in symbols.split(",") if s.strip()] or NIFTY50_SYMBOLS
+
+    # ── Stage 1: Screen ────────────────────────────────────────────────────────
+    scan = scan_engine.last_result()
+    if not scan:
+        scan = scan_engine.run(sym_list)
+        await ws_manager.broadcast({"type": "scan_result", **scan})
+
+    top_candidates = scan.get("top_buys", [])[:10]
+
+    # ── Stages 2 & 3: Adversarial + Scenarios for top 5 ───────────────────────
+    adversarial_results: list[dict] = []
+    scenario_results:    list[dict] = []
+
+    for stock in top_candidates[:5]:
+        sym = stock["symbol"]
+        try:
+            df       = data_engine.get_ohlcv(sym)
+            news     = data_engine.get_news(sym)
+            price    = float(df["Close"].iloc[-1])
+            features = feature_engine.compute(df, news)
+            decision = decision_engine.decide(features["signals"], features)
+            risk     = risk_engine.compute(
+                df, current_price=price,
+                atr=features["atr"],
+                portfolio_value=capital,
+            )
+
+            adv = run_adversarial(sym, features, decision, risk)
+            adversarial_results.append({
+                "symbol": sym,
+                "name":   stock.get("name", sym),
+                "sector": stock.get("sector", "—"),
+                "price":  price,
+                **adv,
+            })
+
+            sc = build_scenarios(sym, df["Close"], features)
+            scenario_results.append(sc)
+
+        except Exception as e:
+            logger.warning("Pipeline analysis failed for %s: %s", sym, e)
+
+    # ── Stage 4: Portfolio Construction ───────────────────────────────────────
+    portfolio = build_portfolio(scan, data_engine, capital=capital)
+
+    # ── Stage 5: Rebalancing ───────────────────────────────────────────────────
+    prices      = {sym: data_engine.get_current_price(sym)
+                   for sym in execution_engine.positions}
+    current_pf  = execution_engine.portfolio_summary(prices)
+
+    # Use the freshly-built portfolio if paper portfolio is empty
+    rebalance_base = portfolio if not current_pf.get("positions") else current_pf
+    rebalance      = generate_rebalance_plan(rebalance_base, scan)
+
+    return {
+        "pipeline_time": _dt.now().isoformat(),
+        "capital":       capital,
+
+        "stage1_screening": {
+            "total_scanned": scan.get("total_scanned", 0),
+            "elapsed_sec":   scan.get("elapsed_sec",   0),
+            "summary":       scan.get("summary",        {}),
+            "top_candidates": [
+                {
+                    "symbol":     s["symbol"],
+                    "name":       s.get("name", s["symbol"]),
+                    "sector":     s.get("sector", "—"),
+                    "confidence": s["confidence"],
+                    "action":     s["action"],
+                    "price":      s["price"],
+                }
+                for s in top_candidates
+            ],
+        },
+
+        "stage2_adversarial": adversarial_results,
+        "stage3_scenarios":   scenario_results,
+        "stage4_portfolio":   portfolio,
+        "stage5_rebalance":   rebalance,
+    }
+
+
+@app.get("/invest/adversarial/{symbol}", tags=["invest"])
+def invest_adversarial(symbol: str):
+    """Bull vs Bear debate for a single stock."""
+    from backend.scanner.adversarial import run_adversarial
+    try:
+        df       = data_engine.get_ohlcv(symbol)
+        news     = data_engine.get_news(symbol)
+        price    = float(df["Close"].iloc[-1])
+        features = feature_engine.compute(df, news)
+        decision = decision_engine.decide(features["signals"], features)
+        risk     = risk_engine.compute(df, current_price=price, atr=features["atr"])
+        return {"symbol": symbol, "price": price,
+                **run_adversarial(symbol, features, decision, risk)}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/invest/scenarios/{symbol}", tags=["invest"])
+def invest_scenarios(symbol: str):
+    """Scenario price targets (bull/base/bear × 1m/3m/6m/12m) for one stock."""
+    from backend.scanner.scenarios import build_scenarios
+    try:
+        df       = data_engine.get_ohlcv(symbol)
+        news     = data_engine.get_news(symbol)
+        features = feature_engine.compute(df, news)
+        return build_scenarios(symbol, df["Close"], features)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.get("/monte-carlo", tags=["analysis"])
 def run_monte_carlo(
     symbol: str = Query(default=DEFAULT_SYMBOL),
