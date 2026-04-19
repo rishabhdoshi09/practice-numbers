@@ -45,28 +45,30 @@ def generate_ohlcv(symbol: str, days: int = 365) -> pd.DataFrame:
     mu = params["drift"] / 252         # daily drift
     sigma = params["vol"] / (252 ** 0.5)  # daily volatility
 
+    # Generate trading dates first, then match array lengths to actual count
+    end_date = datetime.today()
+    trading_dates = pd.bdate_range(end=end_date, periods=days)
+    n = len(trading_dates)  # use actual length to avoid pandas/numpy mismatch
+
     # GBM log-returns
-    z = rng.standard_normal(days)
+    z = rng.standard_normal(n)
     log_returns = (mu - 0.5 * sigma ** 2) + sigma * z
     prices = S0 * np.exp(np.cumsum(log_returns))
 
     # Intraday range ~ half the daily vol applied as symmetric band
-    intraday_range = prices * sigma * rng.uniform(0.5, 1.5, days)
+    intraday_range = prices * sigma * rng.uniform(0.5, 1.5, n)
 
-    opens  = prices * (1 + rng.uniform(-0.005, 0.005, days))
-    highs  = prices + intraday_range * rng.uniform(0.3, 0.7, days)
-    lows   = prices - intraday_range * rng.uniform(0.3, 0.7, days)
+    opens  = prices * (1 + rng.uniform(-0.005, 0.005, n))
+    highs  = prices + intraday_range * rng.uniform(0.3, 0.7, n)
+    lows   = prices - intraday_range * rng.uniform(0.3, 0.7, n)
     # Ensure OHLC consistency
     highs  = np.maximum(highs, np.maximum(opens, prices))
     lows   = np.minimum(lows,  np.minimum(opens, prices))
 
     # Volume: mean-reverting around a base, correlated slightly with abs returns
     base_vol = S0 * 1_000
-    vol_noise = rng.lognormal(0, 0.5, days)
+    vol_noise = rng.lognormal(0, 0.5, n)
     volumes = (base_vol * vol_noise * (1 + 3 * np.abs(log_returns))).astype(int)
-
-    end_date = datetime.today()
-    trading_dates = pd.bdate_range(end=end_date, periods=days)
 
     df = pd.DataFrame({
         "Date":   trading_dates,
