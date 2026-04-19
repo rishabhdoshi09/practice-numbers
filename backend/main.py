@@ -402,22 +402,21 @@ async def daily_report(
     symbols: str  = Query(default=""),
 ):
     """
-    Generate the Daily Street Pulse price-action report.
-    Runs a full scan if no cached result exists, then classifies into
-    Breakout / Momentum / Base / Weak buckets and writes trader-style commentary.
+    Generate the full Daily Street Pulse report with all 8 sections:
+    Executive Summary, Index Tables, Global Cues, Stock Spotlights,
+    EMA Analysis, Sector Heatmap, Corporate News, Tomorrow Breakouts.
     """
     from backend.scanner.universe import NIFTY50_SYMBOLS
-    from backend.scanner.report import generate_report
+    from backend.scanner.report import generate_full_report
 
     sym_list = [s.strip() for s in symbols.split(",") if s.strip()] or NIFTY50_SYMBOLS
 
-    # Use cached scan if fresh (< 10 min), else re-scan
     cached = scan_engine.last_result()
     if not cached:
         cached = scan_engine.run(sym_list)
         await ws_manager.broadcast({"type": "scan_result", **cached})
 
-    report = generate_report(cached)
+    report = generate_full_report(cached)
     return report
 
 
