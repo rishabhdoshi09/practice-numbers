@@ -385,21 +385,20 @@ def search_symbols(
     Used by the StockSelector typeahead.
     """
     from backend.scanner.full_universe import get_full_universe
-    from backend.scanner.universe import NIFTY50
 
     kite     = kite_auth.get_kite() if kite_auth.is_authenticated() else None
     universe = get_full_universe(kite=kite)
 
-    # Add BSE equivalents for stocks we know (same company, .BO suffix)
-    # BSE uses numeric codes but yFinance also accepts SYMBOL.BO for major stocks
+    # Add .BO (BSE) equivalents for every NSE symbol — yFinance supports SYMBOL.BO
     bse_extras: list[dict] = []
-    for item in NIFTY50:
-        bse_sym = item["symbol"].replace(".NS", ".BO")
-        bse_extras.append({
-            "symbol": bse_sym,
-            "name":   item["name"] + " (BSE)",
-            "sector": item["sector"],
-        })
+    for item in universe:
+        if item["symbol"].endswith(".NS"):
+            bse_sym = item["symbol"].replace(".NS", ".BO")
+            bse_extras.append({
+                "symbol": bse_sym,
+                "name":   item["name"] + " (BSE)",
+                "sector": item["sector"],
+            })
 
     combined = universe + bse_extras
 

@@ -197,11 +197,10 @@ def get_full_universe(kite=None) -> list[dict]:
     """
     Return the full tradeable NSE equity universe.
 
-    When Kite is authenticated the instrument map is already loaded by
-    KiteDataProvider.__init__(); we just convert it to the standard
-    [{symbol, name, sector}] format.
-
-    Without Kite we return Nifty 50 + the ~150-symbol midcap extension.
+    Priority:
+      1. Kite instruments API  (~2000 EQ symbols, when authenticated)
+      2. NSE public CSV        (~1800 EQ symbols, fetched/cached daily)
+      3. Static fallback list  (~200 curated symbols)
     """
     from backend.scanner.universe import NIFTY50
 
@@ -212,23 +211,42 @@ def get_full_universe(kite=None) -> list[dict]:
             )
             tokens = load_instruments(kite)
             if tokens:
-                # Build list from full instrument map; use pre-built meta for name
                 nifty_meta = {s["symbol"]: s for s in NIFTY50 + NIFTY_MIDCAP_SYMBOLS}
                 result: list[dict] = []
                 for sym in sorted(tokens.keys()):
-                    meta = nifty_meta.get(sym)
+                    meta   = nifty_meta.get(sym)
                     name   = meta["name"]   if meta else _meta_map.get(sym, {}).get("name", sym.replace(".NS", ""))
                     sector = meta["sector"] if meta else "Others"
                     result.append({"symbol": sym, "name": name, "sector": sector})
-                logger.info("Full universe: %d NSE equities (from Kite)", len(result))
+                logger.info("Full universe: %d NSE equities (Kite)", len(result))
                 return result
         except Exception as e:
-            logger.warning("Could not load full Kite universe: %s — using fallback", e)
+            logger.warning("Could not load Kite universe: %s — trying NSE public", e)
 
-    # Fallback: Nifty 50 + midcap extension
+    # Try NSE public CSV (~1800 EQ symbols, cached 24h)
+    try:
+        from backend.scanner.nse_public import fetch_nse_all_equities
+        nse_list = fetch_nse_all_equities()
+        if len(nse_list) > 100:
+            # Enrich with curated name/sector overrides from static list
+            override = {s["symbol"]: s for s in NIFTY50 + NIFTY_MIDCAP_SYMBOLS}
+            enriched: list[dict] = []
+            for item in nse_list:
+                ov = override.get(item["symbol"])
+                enriched.append({
+                    "symbol": item["symbol"],
+                    "name":   ov["name"]   if ov else item["name"],
+                    "sector": ov["sector"] if ov and ov["sector"] != "Others" else item["sector"],
+                })
+            logger.info("Full universe: %d NSE equities (NSE public CSV)", len(enriched))
+            return enriched
+    except Exception as e:
+        logger.warning("NSE public fetch failed: %s — using static fallback", e)
+
+    # Static fallback: Nifty 50 + midcap extension
     combined = {s["symbol"]: s for s in NIFTY50 + NIFTY_MIDCAP_SYMBOLS}
     result = list(combined.values())
-    logger.info("Full universe: %d symbols (fallback list)", len(result))
+    logger.info("Full universe: %d symbols (static fallback)", len(result))
     return result
 
 

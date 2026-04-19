@@ -126,7 +126,7 @@ export default function JarvisScan({ onSelectStock }) {
   const [scanning,    setScanning]    = useState(false);
   const [tab,         setTab]         = useState("BUY");
   const [wsStatus,    setWsStatus]    = useState("disconnected");
-  const [fullUniverse, setFullUniverse] = useState(false);
+  const [fullUniverse, setFullUniverse] = useState(true);
   const [universeInfo, setUniverseInfo] = useState(null);
   const [progress,    setProgress]    = useState({ done: 0, total: 0 });
   const wsRef = useRef(null);
