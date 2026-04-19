@@ -571,6 +571,58 @@ def invest_scenarios(symbol: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.get("/vp/{symbol}", tags=["volume-profile"])
+def get_volume_profile(
+    symbol:    str,
+    timeframe: str  = Query(default="1d",  description="5m | 15m | 1d"),
+    n_bins:    int  = Query(default=50,    ge=20, le=200),
+    lookback:  int  = Query(default=60,    ge=20, le=500),
+    backtest:  bool = Query(default=True,  description="Include backtest metrics"),
+):
+    """
+    Full Volume Profile analysis for a symbol.
+
+    Returns:
+      - profile: POC, VAH, VAL, HVN/LVN levels, full bin histogram
+      - signals: current LONG / SHORT / HOLD signals with entry/SL/TP
+      - backtest: historical win-rate, Sharpe, drawdown (optional)
+    """
+    from backend.feature_engine.volume_profile import calculate_volume_profile, fetch_vp_ohlcv
+    from backend.feature_engine.vp_signals     import generate_vp_signals
+    from backend.feature_engine.vp_backtest    import run_vp_backtest
+
+    try:
+        df = fetch_vp_ohlcv(symbol, timeframe=timeframe, lookback=lookback)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Data fetch failed: {e}")
+
+    try:
+        vp      = calculate_volume_profile(df, n_bins=n_bins)
+        signals = generate_vp_signals(df, vp)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"VP calculation failed: {e}")
+
+    result: dict = {
+        "symbol":    symbol,
+        "timeframe": timeframe,
+        "lookback":  lookback,
+        "bars":      len(df),
+        "profile":   vp.to_dict(),
+        "signals":   signals,
+        "backtest":  None,
+    }
+
+    if backtest:
+        try:
+            bt_df = fetch_vp_ohlcv(symbol, timeframe=timeframe, lookback=min(lookback * 4, 500))
+            result["backtest"] = run_vp_backtest(bt_df, n_bins=n_bins)
+        except Exception as e:
+            logger.warning("VP backtest failed for %s: %s", symbol, e)
+            result["backtest"] = {"error": str(e)}
+
+    return result
+
+
 @app.get("/monte-carlo", tags=["analysis"])
 def run_monte_carlo(
     symbol: str = Query(default=DEFAULT_SYMBOL),

@@ -14,9 +14,10 @@ import AdvancedPanel    from "./components/AdvancedPanel";
 import PortfolioPanel   from "./components/PortfolioPanel";
 import JarvisScan       from "./components/JarvisScan";
 import DailyReport      from "./components/DailyReport";
-import InvestPanel      from "./components/InvestPanel";
-import Scorecard        from "./components/Scorecard";
-import Loader           from "./components/Loader";
+import InvestPanel         from "./components/InvestPanel";
+import Scorecard           from "./components/Scorecard";
+import VolumeProfileModal  from "./components/VolumeProfile";
+import Loader              from "./components/Loader";
 import { fmtINR }       from "./utils/format";
 
 const NAV = [
@@ -33,6 +34,7 @@ export default function App() {
   const [detail,    setDetail]    = useState(false);
   const [nav,       setNav]       = useState("single");
   const [scorecard, setScorecard] = useState(false);
+  const [vpOpen,    setVpOpen]    = useState(false);
 
   const { decision, analysis, chart, loading, error, reload } = useAnalysis(symbol);
 
@@ -145,6 +147,12 @@ export default function App() {
                     >
                       📊 Scorecard
                     </button>
+                    <button
+                      onClick={() => setVpOpen(true)}
+                      className="text-xs px-3 py-1.5 rounded-lg bg-purple-500/10 border border-purple-500/20 text-purple-400 hover:bg-purple-500/20 transition-all font-semibold"
+                    >
+                      📈 Vol Profile
+                    </button>
                   </div>
                 </div>
 
@@ -221,6 +229,11 @@ export default function App() {
       {/* ── Scorecard modal ───────────────────────────────────────────────── */}
       {scorecard && (
         <Scorecard symbol={symbol} onClose={() => setScorecard(false)} />
+      )}
+
+      {/* ── Volume Profile modal ──────────────────────────────────────────── */}
+      {vpOpen && (
+        <VolumeProfileModal symbol={symbol} price={price} onClose={() => setVpOpen(false)} />
       )}
     </div>
   );
