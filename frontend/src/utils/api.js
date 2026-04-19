@@ -2,7 +2,7 @@ import axios from "axios";
 
 const BASE = process.env.REACT_APP_API_URL || "http://localhost:8000";
 
-const api = axios.create({ baseURL: BASE, timeout: 30_000 });
+const api = axios.create({ baseURL: BASE, timeout: 90_000 });
 
 export const fetchDecision    = (symbol) => api.get(`/decision?symbol=${symbol}`);
 export const fetchAnalysis    = (symbol) => api.get(`/analyse?symbol=${symbol}`);

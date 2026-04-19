@@ -373,6 +373,64 @@ def list_symbols():
     return {"symbols": DEFAULT_SYMBOLS}
 
 
+@app.get("/symbols/search", tags=["market"])
+def search_symbols(
+    q:     str = Query(default="",    description="Search query (name, ticker, sector)"),
+    limit: int = Query(default=80,    ge=1, le=5000),
+    exchange: str = Query(default="all", description="all | nse | bse"),
+):
+    """
+    Search the full NSE+BSE equity universe by name, ticker or sector.
+    Returns up to `limit` matches sorted by relevance.
+    Used by the StockSelector typeahead.
+    """
+    from backend.scanner.full_universe import get_full_universe
+    from backend.scanner.universe import NIFTY50
+
+    kite     = kite_auth.get_kite() if kite_auth.is_authenticated() else None
+    universe = get_full_universe(kite=kite)
+
+    # Add BSE equivalents for stocks we know (same company, .BO suffix)
+    # BSE uses numeric codes but yFinance also accepts SYMBOL.BO for major stocks
+    bse_extras: list[dict] = []
+    for item in NIFTY50:
+        bse_sym = item["symbol"].replace(".NS", ".BO")
+        bse_extras.append({
+            "symbol": bse_sym,
+            "name":   item["name"] + " (BSE)",
+            "sector": item["sector"],
+        })
+
+    combined = universe + bse_extras
+
+    q_lower = q.strip().lower()
+    if q_lower:
+        def score(item):
+            sym  = item["symbol"].lower()
+            name = item["name"].lower()
+            if sym.startswith(q_lower) or name.startswith(q_lower):
+                return 0
+            if q_lower in sym or q_lower in name:
+                return 1
+            if q_lower in (item.get("sector") or "").lower():
+                return 2
+            return 99
+        matched = [i for i in combined if score(i) < 99]
+        matched.sort(key=score)
+    else:
+        matched = combined
+
+    if exchange == "nse":
+        matched = [i for i in matched if i["symbol"].endswith(".NS")]
+    elif exchange == "bse":
+        matched = [i for i in matched if i["symbol"].endswith(".BO")]
+
+    return {
+        "total":   len(matched),
+        "results": matched[:limit],
+    }
+
+
 @app.get("/quote", tags=["market"])
 def get_quote(symbol: str = Query(default=DEFAULT_SYMBOL)):
     try:
