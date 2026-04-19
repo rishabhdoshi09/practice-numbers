@@ -396,6 +396,31 @@ def optimize_portfolio(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.get("/report/daily", tags=["jarvis"])
+async def daily_report(
+    universe: str = Query(default="nifty50"),
+    symbols: str  = Query(default=""),
+):
+    """
+    Generate the Daily Street Pulse price-action report.
+    Runs a full scan if no cached result exists, then classifies into
+    Breakout / Momentum / Base / Weak buckets and writes trader-style commentary.
+    """
+    from backend.scanner.universe import NIFTY50_SYMBOLS
+    from backend.scanner.report import generate_report
+
+    sym_list = [s.strip() for s in symbols.split(",") if s.strip()] or NIFTY50_SYMBOLS
+
+    # Use cached scan if fresh (< 10 min), else re-scan
+    cached = scan_engine.last_result()
+    if not cached:
+        cached = scan_engine.run(sym_list)
+        await ws_manager.broadcast({"type": "scan_result", **cached})
+
+    report = generate_report(cached)
+    return report
+
+
 @app.get("/monte-carlo", tags=["analysis"])
 def run_monte_carlo(
     symbol: str = Query(default=DEFAULT_SYMBOL),

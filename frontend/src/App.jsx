@@ -13,12 +13,14 @@ import RiskPanel        from "./components/RiskPanel";
 import AdvancedPanel    from "./components/AdvancedPanel";
 import PortfolioPanel   from "./components/PortfolioPanel";
 import JarvisScan       from "./components/JarvisScan";
+import DailyReport      from "./components/DailyReport";
 import Loader           from "./components/Loader";
 import { fmtINR }       from "./utils/format";
 
 const NAV = [
-  { id: "single", label: "Single",  icon: "◎" },
-  { id: "jarvis", label: "JARVIS",  icon: "⚡" },
+  { id: "single",    label: "Single",    icon: "◎" },
+  { id: "jarvis",    label: "JARVIS",    icon: "⚡" },
+  { id: "report",    label: "Pulse",     icon: "📰" },
   { id: "portfolio", label: "Portfolio", icon: "◈" },
 ];
 
@@ -90,6 +92,11 @@ export default function App() {
         {/* ── JARVIS tab ──────────────────────────────────────────────────── */}
         {nav === "jarvis" && (
           <JarvisScan onSelectStock={handleJarvisSelect} />
+        )}
+
+        {/* ── Daily Report tab ─────────────────────────────────────────────── */}
+        {nav === "report" && (
+          <DailyReport onSelectStock={(sym) => { setSymbol(sym); setNav("single"); setDetail(true); }} />
         )}
 
         {/* ── Portfolio tab ────────────────────────────────────────────────── */}
