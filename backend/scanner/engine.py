@@ -114,8 +114,11 @@ class ScanEngine:
             meta = SYMBOL_META.get(symbol, {})
 
             # Find strongest contributing signal
-            breakdown    = decision["signal_breakdown"]
-            top_signal   = max(breakdown, key=lambda k: abs(breakdown[k]["contribution"]))
+            breakdown  = decision.get("signal_breakdown", {})
+            top_signal = (
+                max(breakdown, key=lambda k: abs(breakdown[k].get("contribution", 0)))
+                if breakdown else "—"
+            )
 
             return {
                 "symbol":      symbol,

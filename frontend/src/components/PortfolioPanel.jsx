@@ -4,8 +4,9 @@ import { fmtINR, fmtPct } from "../utils/format";
 
 export default function PortfolioPanel({ symbol, decision }) {
   const [portfolio, setPortfolio] = useState(null);
-  const [placing, setPlacing] = useState(false);
-  const [lastFill, setLastFill] = useState(null);
+  const [placing,   setPlacing]   = useState(false);
+  const [lastFill,  setLastFill]  = useState(null);
+  const [orderErr,  setOrderErr]  = useState(null);
 
   const load = () => fetchPortfolio().then((r) => setPortfolio(r.data)).catch(() => {});
 
@@ -13,12 +14,15 @@ export default function PortfolioPanel({ symbol, decision }) {
 
   const handleOrder = async (side) => {
     setPlacing(true);
+    setOrderErr(null);
     try {
       const r = await placeOrder(symbol, side, 50000);
       setLastFill(r.data);
       await load();
     } catch (e) {
-      console.error(e);
+      const msg = e?.response?.data?.detail || e.message || "Order failed";
+      setOrderErr(msg);
+      console.error("Order error:", e);
     } finally {
       setPlacing(false);
     }
@@ -65,6 +69,12 @@ export default function PortfolioPanel({ symbol, decision }) {
           {placing ? "…" : "Paper SELL"}
         </button>
       </div>
+
+      {orderErr && (
+        <div className="mt-2 text-xs text-sell bg-sell/5 border border-sell/20 rounded-lg px-3 py-2">
+          ⚠ {orderErr}
+        </div>
+      )}
 
       {lastFill && (
         <div className="mt-3 bg-surface rounded-xl p-3 text-xs font-mono text-slate-400">

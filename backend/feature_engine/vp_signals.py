@@ -35,6 +35,9 @@ def generate_vp_signals(df: pd.DataFrame, vp: VolumeProfile) -> list[dict]:
     Returns a list of signal dicts sorted by confidence descending.
     Always returns at least one HOLD signal if no trade setup found.
     """
+    if df is None or len(df) < 5:
+        raise ValueError("generate_vp_signals: need at least 5 rows of OHLCV data")
+
     signals: list[dict] = []
     price  = float(df["Close"].iloc[-1])
     open_  = float(df["Open"].iloc[-1])

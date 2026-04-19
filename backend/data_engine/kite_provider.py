@@ -267,7 +267,8 @@ class KiteDataProvider:
             order_type: 'MARKET' | 'LIMIT' | 'SL-M'
             price: limit price (only for LIMIT/SL orders)
         """
-        from kiteconnect import KiteConnect
+        if qty <= 0:
+            raise ValueError(f"Invalid order quantity: {qty}")
 
         tradingsymbol = _kite_symbol(symbol)
         transaction   = self._kite.TRANSACTION_TYPE_BUY if side == "BUY" \

@@ -47,13 +47,14 @@ class ConnectionManager:
     async def broadcast(self, data: dict):
         payload = json.dumps(data)
         dead = []
-        for ws in self.active:
+        for ws in list(self.active):   # copy to avoid mutation-during-iteration race
             try:
                 await ws.send_text(payload)
             except Exception:
                 dead.append(ws)
         for ws in dead:
-            self.active.remove(ws)
+            if ws in self.active:
+                self.active.remove(ws)
 
 
 ws_manager = ConnectionManager()
@@ -94,7 +95,7 @@ app = FastAPI(
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_credentials=True,
+    allow_credentials=False,   # cannot be True with wildcard origin (CORS spec violation)
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -401,7 +402,10 @@ def get_chart_data(symbol: str = Query(default=DEFAULT_SYMBOL),
 
 @app.get("/orderbook", tags=["market"])
 def get_order_book(symbol: str = Query(default=DEFAULT_SYMBOL)):
-    return {"symbol": symbol, "orderbook": data_engine.get_order_book(symbol)}
+    try:
+        return {"symbol": symbol, "orderbook": data_engine.get_order_book(symbol)}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 # ── Analysis ───────────────────────────────────────────────────────────────────
@@ -424,8 +428,13 @@ def get_decision(symbol: str = Query(default=DEFAULT_SYMBOL)):
             "price":         a["price"],
             "data_source":   a["data_source"],
             "decision":      a["decision"],
-            "stop_loss":     a["risk"]["stop_loss"]["price"],
-            "news_sentiment": a["features"]["model_details"]["sentiment"]["label"],
+            "stop_loss":     a["risk"].get("stop_loss", {}).get("price"),
+            "news_sentiment": (
+                a.get("features", {})
+                 .get("model_details", {})
+                 .get("sentiment", {})
+                 .get("label", "neutral")
+            ),
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

@@ -5,10 +5,11 @@ Priority:  Kite Connect (live, real-time)  →  yFinance (live, 15-min delay)
 No synthetic/dummy data is used in production.
 """
 import logging
+import time
 from typing import Optional
 import pandas as pd
 
-from backend.config import HISTORY_DAYS, INTRADAY_INTERVAL
+from backend.config import HISTORY_DAYS, INTRADAY_INTERVAL, DATA_CACHE_TTL_SECONDS
 
 logger = logging.getLogger(__name__)
 
@@ -18,7 +19,7 @@ class DataEngine:
 
     def __init__(self, use_live: bool = True):
         self._use_live   = use_live
-        self._cache: dict[str, pd.DataFrame] = {}
+        self._cache: dict[str, tuple[float, pd.DataFrame]] = {}  # key → (timestamp, df)
         self._kite_provider = None
 
     def set_kite(self, kite_provider):
@@ -30,8 +31,13 @@ class DataEngine:
 
     def get_ohlcv(self, symbol: str, days: int = HISTORY_DAYS) -> pd.DataFrame:
         cache_key = f"{symbol}:{days}"
-        if cache_key in self._cache:
-            return self._cache[cache_key]
+        cached = self._cache.get(cache_key)
+        if cached:
+            ts, df = cached
+            if time.time() - ts < DATA_CACHE_TTL_SECONDS:
+                return df
+            # Expired — remove stale entry and refetch
+            del self._cache[cache_key]
 
         df = None
 
@@ -41,11 +47,12 @@ class DataEngine:
                 df = self._kite_provider.get_ohlcv(symbol, days)
                 logger.info("Kite data fetched for %s (%d rows)", symbol, len(df))
             except Exception as e:
-                logger.warning("Kite OHLCV failed for %s: %s", symbol, e)
+                logger.warning("Kite OHLCV failed for %s — falling back to yFinance: %s", symbol, e)
 
         # 2. yFinance (15-min delayed, real data)
         if df is None or df.empty:
             if self._use_live:
+                logger.debug("Fetching yFinance data for %s", symbol)
                 df = self._fetch_yfinance(symbol, days)
 
         if df is None or df.empty:
@@ -56,7 +63,7 @@ class DataEngine:
 
         df.columns = [c.capitalize() for c in df.columns]
         df = df[["Open", "High", "Low", "Close", "Volume"]].dropna()
-        self._cache[cache_key] = df
+        self._cache[cache_key] = (time.time(), df)
         return df
 
     def get_quote(self, symbol: str) -> dict:
@@ -140,6 +147,14 @@ class DataEngine:
 
     def clear_cache(self):
         self._cache.clear()
+
+    def cache_stats(self) -> dict:
+        now = time.time()
+        return {
+            "entries": len(self._cache),
+            "live": sum(1 for ts, _ in self._cache.values() if now - ts < DATA_CACHE_TTL_SECONDS),
+            "expired": sum(1 for ts, _ in self._cache.values() if now - ts >= DATA_CACHE_TTL_SECONDS),
+        }
 
     # ── Private ────────────────────────────────────────────────────────────────
 

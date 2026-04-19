@@ -18,3 +18,7 @@ export const optimizePortfolio = (symbols) =>
   api.get(`/portfolio/optimize?symbols=${symbols.join(",")}`);
 export const placeOrder = (symbol, side, position_inr) =>
   api.post("/order", { symbol, side, position_inr });
+
+export const fetchScorecard     = (symbol) => api.get(`/invest/scorecard/${encodeURIComponent(symbol)}`);
+export const fetchVolumeProfile = (symbol, timeframe = "1d", lookback = 60) =>
+  api.get(`/vp/${encodeURIComponent(symbol)}?timeframe=${timeframe}&lookback=${lookback}&backtest=true`);
