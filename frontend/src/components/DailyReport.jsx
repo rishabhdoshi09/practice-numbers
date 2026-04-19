@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useCallback } from "react";
 import clsx from "clsx";
 import {
-  AreaChart, Area, LineChart, Line, BarChart, Bar,
-  XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend,
+  LineChart, Line,
+  XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
 } from "recharts";
 
 const API = process.env.REACT_APP_API_URL || "http://localhost:8000";
@@ -161,13 +161,13 @@ function SpotlightCard({ stock, color, onSelect }) {
 
 // ── Stock Spotlights ──────────────────────────────────────────────────────────
 function StockSpotlights({ data, onSelect }) {
+  const [tab, setTab] = useState("buzzing");
   if (!data) return null;
   const tabs = [
     { key: "buzzing", label: "🚀 Buzzing", color: "bg-buy/10 border-buy/30 text-buy" },
     { key: "gaining", label: "💪 Gaining",  color: "bg-sky-500/10 border-sky-500/30 text-sky-400" },
     { key: "losing",  label: "⚠️ Losing",   color: "bg-sell/10 border-sell/30 text-sell" },
   ];
-  const [tab, setTab] = useState("buzzing");
   const current = data[tab] || [];
 
   return (

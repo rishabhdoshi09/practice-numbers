@@ -1,7 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import clsx from "clsx";
-import { fetchAnalysis } from "../utils/api";
-import { fmtINR } from "../utils/format";
 
 const WS_URL = (process.env.REACT_APP_API_URL || "http://localhost:8000")
   .replace("http", "ws") + "/ws/scan";
