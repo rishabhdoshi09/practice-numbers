@@ -14,6 +14,14 @@ scipy>=1.14.0
 statsmodels>=0.14.2
 arch>=6.3.0
 
+# Scheduler & timezone
+apscheduler>=3.10.0
+pytz>=2024.1
+
+# Kite Connect
+kiteconnect>=5.0.1
+python-dotenv>=1.0.0
+
 # Dev / test
 httpx>=0.27.0
 pytest>=8.2.0

@@ -12,25 +12,39 @@ import NewsPanel        from "./components/NewsPanel";
 import RiskPanel        from "./components/RiskPanel";
 import AdvancedPanel    from "./components/AdvancedPanel";
 import PortfolioPanel   from "./components/PortfolioPanel";
+import JarvisScan       from "./components/JarvisScan";
 import Loader           from "./components/Loader";
 import { fmtINR }       from "./utils/format";
+
+const NAV = [
+  { id: "single", label: "Single",  icon: "◎" },
+  { id: "jarvis", label: "JARVIS",  icon: "⚡" },
+  { id: "portfolio", label: "Portfolio", icon: "◈" },
+];
 
 export default function App() {
   const [symbol,   setSymbol]   = useState("RELIANCE.NS");
   const [advanced, setAdvanced] = useState(false);
-  const [screen,   setScreen]   = useState("home"); // "home" | "detail"
+  const [detail,   setDetail]   = useState(false);
+  const [nav,      setNav]      = useState("single");
 
   const { decision, analysis, chart, loading, error, reload } = useAnalysis(symbol);
 
-  const action     = decision?.decision?.action      || "HOLD";
-  const confidence = decision?.decision?.confidence  || 0;
-  const riskLevel  = decision?.decision?.risk_level  || "MEDIUM";
-  const price      = decision?.price                 || 0;
+  const action     = decision?.decision?.action     || "HOLD";
+  const confidence = decision?.decision?.confidence || 0;
+  const riskLevel  = decision?.decision?.risk_level || "MEDIUM";
+  const price      = decision?.price                || 0;
   const stopLoss   = decision?.stop_loss;
+
+  const handleJarvisSelect = (sym) => {
+    setSymbol(sym);
+    setNav("single");
+    setDetail(true);
+  };
 
   return (
     <div className="min-h-screen bg-surface flex flex-col">
-      {/* ── Top bar ─────────────────────────────────────────────────────────── */}
+      {/* ── Top bar ─────────────────────────────────────────────────────── */}
       <header className="sticky top-0 z-40 bg-surface/80 backdrop-blur border-b border-border">
         <div className="max-w-lg mx-auto px-4 py-3 flex items-center justify-between">
           <div className="flex items-center gap-2">
@@ -38,21 +52,26 @@ export default function App() {
               <span className="text-xs font-black text-white">SQ</span>
             </div>
             <span className="font-bold text-slate-100 text-base tracking-tight">SimpleQuant</span>
+            {nav === "jarvis" && (
+              <span className="text-xs font-semibold text-sky-400 bg-sky-500/10 border border-sky-500/20 rounded-full px-2 py-0.5">
+                JARVIS
+              </span>
+            )}
           </div>
           <div className="flex items-center gap-2">
-            {/* Advanced toggle */}
-            <button
-              onClick={() => setAdvanced(!advanced)}
-              className={clsx(
-                "text-xs px-3 py-1.5 rounded-lg font-medium transition-all",
-                advanced
-                  ? "bg-sky-500/20 text-sky-400 border border-sky-500/30"
-                  : "bg-panel text-slate-400 border border-border hover:text-slate-200"
-              )}
-            >
-              {advanced ? "Simple" : "Advanced"}
-            </button>
-            {/* Refresh */}
+            {nav === "single" && (
+              <button
+                onClick={() => setAdvanced(!advanced)}
+                className={clsx(
+                  "text-xs px-3 py-1.5 rounded-lg font-medium transition-all",
+                  advanced
+                    ? "bg-sky-500/20 text-sky-400 border border-sky-500/30"
+                    : "bg-panel text-slate-400 border border-border hover:text-slate-200"
+                )}
+              >
+                {advanced ? "Simple" : "Advanced"}
+              </button>
+            )}
             <button
               onClick={reload}
               className="w-8 h-8 bg-panel border border-border rounded-lg flex items-center justify-center text-slate-400 hover:text-slate-200 transition-colors"
@@ -65,97 +84,115 @@ export default function App() {
         </div>
       </header>
 
-      {/* ── Main content ─────────────────────────────────────────────────────── */}
-      <main className="flex-1 max-w-lg mx-auto w-full px-4 py-6 space-y-5">
+      {/* ── Main ─────────────────────────────────────────────────────────── */}
+      <main className="flex-1 max-w-lg mx-auto w-full px-4 py-5 space-y-4">
 
-        {/* Stock selector */}
-        <StockSelector value={symbol} onChange={(s) => { setSymbol(s); setScreen("home"); }} />
-
-        {/* Error state */}
-        {error && (
-          <div className="card border-sell/30 text-sell text-sm">
-            ⚠ {error}
-          </div>
+        {/* ── JARVIS tab ──────────────────────────────────────────────────── */}
+        {nav === "jarvis" && (
+          <JarvisScan onSelectStock={handleJarvisSelect} />
         )}
 
-        {/* Loading state */}
-        {loading && <Loader label="Running quant analysis…" />}
+        {/* ── Portfolio tab ────────────────────────────────────────────────── */}
+        {nav === "portfolio" && (
+          <PortfolioPanel symbol={symbol} decision={decision} standalone />
+        )}
 
-        {/* ── HOME SCREEN ───────────────────────────────────────────────────── */}
-        {!loading && decision && (
+        {/* ── Single stock tab ──────────────────────────────────────────────── */}
+        {nav === "single" && (
           <>
-            {/* Price header */}
-            <div className="flex items-end justify-between">
-              <div>
-                <p className="text-xs text-slate-400 uppercase tracking-wider mb-1">
-                  {symbol.split(".")[0]}
-                </p>
-                <p className="text-3xl font-black text-slate-100">
-                  {fmtINR(price)}
-                </p>
-              </div>
-              <RiskBadge risk={riskLevel} />
-            </div>
+            <StockSelector value={symbol} onChange={(s) => { setSymbol(s); setDetail(false); }} />
 
-            {/* ── THE BIG BUTTON ────────────────────────────────────────────── */}
-            <div className="flex flex-col items-center gap-6 py-4">
-              <ActionButton
-                action={action}
-                confidence={Math.round(confidence)}
-                onClick={() => setScreen(screen === "detail" ? "home" : "detail")}
-              />
-              <ConfidenceMeter action={action} confidence={confidence} />
-            </div>
+            {error && (
+              <div className="card border-sell/30 text-sell text-sm">⚠ {error}</div>
+            )}
 
-            {/* Stop loss callout */}
-            {stopLoss && (
-              <div className="flex items-center gap-3 bg-sell/5 border border-sell/20 rounded-xl px-4 py-3">
-                <div className="w-1.5 h-8 bg-sell rounded-full" />
-                <div>
-                  <p className="text-xs text-slate-400">Stop Loss Level</p>
-                  <p className="text-lg font-bold text-sell">{fmtINR(stopLoss)}</p>
+            {loading && <Loader label="Running quant analysis…" />}
+
+            {!loading && decision && (
+              <>
+                {/* Price header */}
+                <div className="flex items-end justify-between">
+                  <div>
+                    <p className="text-xs text-slate-400 uppercase tracking-wider mb-1">
+                      {symbol.split(".")[0]}
+                      {decision.data_source === "kite_live" && (
+                        <span className="ml-2 text-buy font-semibold">● LIVE</span>
+                      )}
+                    </p>
+                    <p className="text-3xl font-black text-slate-100">{fmtINR(price)}</p>
+                  </div>
+                  <RiskBadge risk={riskLevel} />
                 </div>
-              </div>
-            )}
 
-            {/* Tap-to-expand detail screen */}
-            {screen === "detail" && (
-              <div className="space-y-4 animate-slide-up">
-                <PriceChart chart={chart} stopLoss={stopLoss} analysis={analysis} />
-                <SignalBreakdown
-                  breakdown={decision?.decision?.signal_breakdown}
-                  agreePct={decision?.decision?.signals_agree}
-                />
-                <NewsPanel news={analysis?.news} />
-                <RiskPanel risk={analysis?.risk} />
-                <PortfolioPanel symbol={symbol} decision={decision} />
-              </div>
-            )}
+                {/* BIG BUTTON */}
+                <div className="flex flex-col items-center gap-5 py-2">
+                  <ActionButton
+                    action={action}
+                    confidence={Math.round(confidence)}
+                    onClick={() => setDetail(!detail)}
+                  />
+                  <ConfidenceMeter action={action} confidence={confidence} />
+                </div>
 
-            {/* Advanced quant panel */}
-            {advanced && (
-              <AdvancedPanel analysis={analysis} symbol={symbol} />
-            )}
+                {/* Stop loss */}
+                {stopLoss && (
+                  <div className="flex items-center gap-3 bg-sell/5 border border-sell/20 rounded-xl px-4 py-3">
+                    <div className="w-1.5 h-8 bg-sell rounded-full" />
+                    <div>
+                      <p className="text-xs text-slate-400">Stop Loss Level</p>
+                      <p className="text-lg font-bold text-sell">{fmtINR(stopLoss)}</p>
+                    </div>
+                  </div>
+                )}
 
-            {/* "Tap to see detail" prompt */}
-            {screen === "home" && !advanced && (
-              <button
-                onClick={() => setScreen("detail")}
-                className="w-full text-center text-sm text-slate-500 hover:text-slate-300 transition-colors py-2"
-              >
-                Tap the button for details ↓
-              </button>
+                {/* Detail screen */}
+                {detail && (
+                  <div className="space-y-4 animate-slide-up">
+                    <PriceChart chart={chart} stopLoss={stopLoss} analysis={analysis} />
+                    <SignalBreakdown
+                      breakdown={decision?.decision?.signal_breakdown}
+                      agreePct={decision?.decision?.signals_agree}
+                    />
+                    <NewsPanel news={analysis?.news} />
+                    <RiskPanel risk={analysis?.risk} />
+                  </div>
+                )}
+
+                {/* Advanced panel */}
+                {advanced && <AdvancedPanel analysis={analysis} symbol={symbol} />}
+
+                {!detail && !advanced && (
+                  <button onClick={() => setDetail(true)}
+                    className="w-full text-center text-sm text-slate-500 hover:text-slate-300 transition-colors py-2">
+                    Tap the button for details ↓
+                  </button>
+                )}
+              </>
             )}
           </>
         )}
       </main>
 
-      {/* ── Footer ──────────────────────────────────────────────────────────── */}
-      <footer className="border-t border-border py-4">
-        <p className="text-center text-xs text-slate-600">
-          SimpleQuant · Paper trading only · Not financial advice
-        </p>
-      </footer>
+      {/* ── Bottom nav ────────────────────────────────────────────────────── */}
+      <nav className="sticky bottom-0 z-40 bg-surface/90 backdrop-blur border-t border-border">
+        <div className="max-w-lg mx-auto px-4 py-2 flex gap-1">
+          {NAV.map((item) => (
+            <button
+              key={item.id}
+              onClick={() => setNav(item.id)}
+              className={clsx(
+                "flex-1 flex flex-col items-center gap-0.5 py-2 rounded-xl transition-all text-xs font-semibold",
+                nav === item.id
+                  ? "bg-panel text-slate-100"
+                  : "text-slate-500 hover:text-slate-300"
+              )}
+            >
+              <span className="text-base leading-none">{item.icon}</span>
+              <span>{item.label}</span>
+            </button>
+          ))}
+        </div>
+      </nav>
     </div>
   );
 }

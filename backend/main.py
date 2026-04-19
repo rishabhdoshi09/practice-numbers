@@ -1,17 +1,20 @@
 """
-SimpleQuant FastAPI backend.
-All five engines + Zerodha Kite Connect live data & order placement.
+SimpleQuant FastAPI backend v3 — JARVIS Edition.
+Five engines + Kite live data + scheduled market scanning + WebSocket push.
 """
 from __future__ import annotations
+import json
 import logging
 import os
+from contextlib import asynccontextmanager
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException, Query
+
+load_dotenv()
+
+from fastapi import FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
-
-load_dotenv()
 
 from backend.config import DEFAULT_SYMBOLS, DEFAULT_SYMBOL, DEFAULT_PORTFOLIO_VALUE
 from backend.data_engine import DataEngine
@@ -19,16 +22,73 @@ from backend.feature_engine import FeatureEngine
 from backend.decision_engine import DecisionEngine
 from backend.risk_engine import RiskEngine
 from backend.execution_engine import ExecutionEngine
+from backend.scanner import ScanEngine
 from backend import kite_auth
 
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 logger = logging.getLogger(__name__)
 
-# ── App ────────────────────────────────────────────────────────────────────────
+# ── WebSocket connection manager ───────────────────────────────────────────────
+
+class ConnectionManager:
+    """Manages active WebSocket connections for scan result broadcasting."""
+    def __init__(self):
+        self.active: list[WebSocket] = []
+
+    async def connect(self, ws: WebSocket):
+        await ws.accept()
+        self.active.append(ws)
+        logger.info("WS client connected (total: %d)", len(self.active))
+
+    def disconnect(self, ws: WebSocket):
+        self.active.remove(ws)
+        logger.info("WS client disconnected (total: %d)", len(self.active))
+
+    async def broadcast(self, data: dict):
+        payload = json.dumps(data)
+        dead = []
+        for ws in self.active:
+            try:
+                await ws.send_text(payload)
+            except Exception:
+                dead.append(ws)
+        for ws in dead:
+            self.active.remove(ws)
+
+
+ws_manager = ConnectionManager()
+
+# ── Engine singletons ──────────────────────────────────────────────────────────
+data_engine      = DataEngine(use_live=True)
+feature_engine   = FeatureEngine()
+decision_engine  = DecisionEngine()
+risk_engine      = RiskEngine()
+execution_engine = ExecutionEngine(starting_capital=DEFAULT_PORTFOLIO_VALUE)
+scan_engine      = ScanEngine(data_engine)
+
+# ── App lifespan ───────────────────────────────────────────────────────────────
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Activate Kite if token saved
+    _wire_kite()
+
+    # Start JARVIS scheduler
+    from backend.scanner.scheduler import init_scheduler
+    scheduler = init_scheduler(scan_engine, ws_broadcast=ws_manager.broadcast)
+    logger.info("JARVIS scheduler active — waiting for market open (9:15 IST)")
+
+    yield  # app is running
+
+    scheduler.shutdown(wait=False)
+    logger.info("Scheduler stopped")
+
+
 app = FastAPI(
-    title="SimpleQuant API",
-    description="Full-stack quant trading — Zerodha Kite live data + 5-engine analysis",
-    version="2.0.0",
+    title="SimpleQuant JARVIS API",
+    description="Quant trading — Kite live data + JARVIS auto-scan + WebSocket alerts",
+    version="3.0.0",
+    lifespan=lifespan,
 )
 
 app.add_middleware(
@@ -39,35 +99,19 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ── Singletons ─────────────────────────────────────────────────────────────────
-data_engine      = DataEngine(use_live=True)
-feature_engine   = FeatureEngine()
-decision_engine  = DecisionEngine()
-risk_engine      = RiskEngine()
-execution_engine = ExecutionEngine(starting_capital=DEFAULT_PORTFOLIO_VALUE)
-
-# Wire up Kite if already authenticated (access token in .env)
-_kite = kite_auth.get_kite()
-if _kite:
-    from backend.data_engine.kite_provider import KiteDataProvider
-    _kite_provider = KiteDataProvider(_kite)
-    data_engine.set_kite(_kite_provider)
-    logger.info("Kite Connect: authenticated from saved token")
-else:
-    logger.info("Kite Connect: not authenticated — using yFinance/dummy fallback")
-
-
-# ── Models ─────────────────────────────────────────────────────────────────────
-class OrderRequest(BaseModel):
-    symbol: str
-    side: str
-    qty: int = 1
-    order_type: str = "MARKET"
-    price: float = 0.0
-    use_real: bool = False      # True → real Kite order, False → paper trade
-
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
+
+def _wire_kite():
+    """Activate Kite provider from saved access token."""
+    kite = kite_auth.get_kite()
+    if kite:
+        from backend.data_engine.kite_provider import KiteDataProvider
+        provider = KiteDataProvider(kite)
+        data_engine.set_kite(provider)
+        logger.info("Kite live data active (saved token)")
+
+
 def _analyse(symbol: str) -> dict:
     df    = data_engine.get_ohlcv(symbol)
     news  = data_engine.get_news(symbol)
@@ -76,11 +120,7 @@ def _analyse(symbol: str) -> dict:
     features = feature_engine.compute(df, news)
     decision = decision_engine.decide(features["signals"], features)
     risk     = risk_engine.compute(
-        df,
-        current_price=price,
-        atr=features["atr"],
-        win_rate=0.55,
-        avg_win_loss=1.4,
+        df, current_price=price, atr=features["atr"],
         portfolio_value=execution_engine.cash,
     )
     return {
@@ -94,53 +134,74 @@ def _analyse(symbol: str) -> dict:
     }
 
 
-# ── Health & auth status ───────────────────────────────────────────────────────
+# ── Models ─────────────────────────────────────────────────────────────────────
+
+class OrderRequest(BaseModel):
+    symbol: str
+    side: str
+    qty: int = 1
+    order_type: str = "MARKET"
+    price: float = 0.0
+    use_real: bool = False
+
+
+# ── WebSocket ──────────────────────────────────────────────────────────────────
+
+@app.websocket("/ws/scan")
+async def ws_scan(websocket: WebSocket):
+    """
+    Real-time scan results pushed to frontend.
+    Connect once — receive every scan update automatically.
+    Also accepts 'ping' messages for keepalive.
+    """
+    await ws_manager.connect(websocket)
+    # Send last cached result immediately on connect
+    last = scan_engine.last_result()
+    if last:
+        await websocket.send_text(json.dumps({"type": "scan_result", **last}))
+    try:
+        while True:
+            msg = await websocket.receive_text()
+            if msg == "ping":
+                await websocket.send_text(json.dumps({"type": "pong"}))
+    except WebSocketDisconnect:
+        ws_manager.disconnect(websocket)
+
+
+# ── Health & status ────────────────────────────────────────────────────────────
 
 @app.get("/", tags=["health"])
 def health():
     return {
         "status": "ok",
-        "service": "SimpleQuant API v2.0",
+        "version": "3.0.0 JARVIS",
         "kite_authenticated": kite_auth.is_authenticated(),
         "data_source": "kite_live" if kite_auth.is_authenticated() else "yfinance/dummy",
+        "ws_clients": len(ws_manager.active),
     }
 
 
-# ── Kite auth routes ───────────────────────────────────────────────────────────
+# ── Kite auth ──────────────────────────────────────────────────────────────────
 
 @app.get("/kite/login", tags=["auth"])
 def kite_login():
-    """Redirect user to Zerodha login. Open this URL in browser once per day."""
-    url = kite_auth.get_login_url()
-    return RedirectResponse(url=url)
+    """Open in browser once per day to authenticate with Zerodha."""
+    return RedirectResponse(url=kite_auth.get_login_url())
 
 
 @app.get("/kite/callback", tags=["auth"])
-def kite_callback(request_token: str):
-    """
-    Zerodha redirects here after login with request_token.
-    Exchanges it for access_token and activates live data.
-    """
-    global _kite_provider
+async def kite_callback(request_token: str):
     try:
-        token = kite_auth.exchange_token(request_token)
-        kite  = kite_auth.get_kite()
-        from backend.data_engine.kite_provider import KiteDataProvider
-        _kite_provider = KiteDataProvider(kite)
-        data_engine.set_kite(_kite_provider)
+        kite_auth.exchange_token(request_token)
+        _wire_kite()
         data_engine.clear_cache()
-        # Start WebSocket ticker for default symbols
-        _kite_provider.start_ticker(
-            DEFAULT_SYMBOLS,
-            on_tick=lambda sym, price: logger.debug("Tick %s: %.2f", sym, price),
-        )
-        return {
-            "status": "authenticated",
-            "message": "Kite live data active. Real-time WebSocket streaming started.",
-            "access_token_preview": token[:8] + "...",
-        }
+        kite = kite_auth.get_kite()
+        from backend.data_engine.kite_provider import KiteDataProvider
+        provider = KiteDataProvider(kite)
+        provider.start_ticker(DEFAULT_SYMBOLS[:15],
+                              on_tick=lambda s, p: logger.debug("Tick %s %.2f", s, p))
+        return {"status": "authenticated", "message": "Kite live data + WebSocket ticker active"}
     except Exception as e:
-        logger.exception("Kite callback failed")
         raise HTTPException(status_code=400, detail=str(e))
 
 
@@ -148,8 +209,63 @@ def kite_callback(request_token: str):
 def kite_status():
     return {
         "authenticated": kite_auth.is_authenticated(),
-        "data_source":   "kite_live" if kite_auth.is_authenticated() else "yfinance/dummy",
-        "login_url":     "http://localhost:8000/kite/login",
+        "data_source": "kite_live" if kite_auth.is_authenticated() else "yfinance/dummy",
+        "login_url": "http://localhost:8000/kite/login",
+    }
+
+
+# ── JARVIS scan ────────────────────────────────────────────────────────────────
+
+@app.get("/scan", tags=["jarvis"])
+async def run_scan(
+    universe: str = Query(default="nifty50", description="nifty50 | custom"),
+    symbols: str  = Query(default="", description="Comma-separated override"),
+):
+    """
+    Trigger an on-demand full market scan.
+    Results are also pushed to all connected WebSocket clients.
+    """
+    from backend.scanner.universe import NIFTY50_SYMBOLS
+    sym_list = [s.strip() for s in symbols.split(",") if s.strip()] or NIFTY50_SYMBOLS
+
+    progress_log: list[str] = []
+
+    def on_progress(done, total, sym):
+        progress_log.append(f"{done}/{total} {sym}")
+
+    try:
+        result = scan_engine.run(sym_list, on_progress=on_progress)
+        await ws_manager.broadcast({"type": "scan_result", **result})
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/scan/last", tags=["jarvis"])
+def get_last_scan():
+    """Return the most recent cached scan result without re-running."""
+    result = scan_engine.last_result()
+    if not result:
+        raise HTTPException(status_code=404, detail="No scan run yet. Call /scan first.")
+    return result
+
+
+@app.get("/scan/schedule", tags=["jarvis"])
+def get_schedule():
+    """Show JARVIS schedule for today."""
+    import pytz
+    from datetime import datetime
+    IST = pytz.timezone("Asia/Kolkata")
+    now = datetime.now(IST)
+    return {
+        "current_time_ist": now.strftime("%H:%M:%S IST"),
+        "scheduled_jobs": [
+            {"time": "09:15 IST", "label": "Market Open Scan",  "id": "market_open"},
+            {"time": "11:00 IST", "label": "Mid-Morning Rescan", "id": "midmorning"},
+            {"time": "13:00 IST", "label": "Midday Pulse",       "id": "midday"},
+            {"time": "15:20 IST", "label": "Pre-Close Scan",     "id": "preclose"},
+            {"time": "15:30 IST", "label": "End-of-Day Summary", "id": "eod_summary"},
+        ],
     }
 
 
@@ -162,7 +278,6 @@ def list_symbols():
 
 @app.get("/quote", tags=["market"])
 def get_quote(symbol: str = Query(default=DEFAULT_SYMBOL)):
-    """Real-time price quote (Kite) or last close (fallback)."""
     try:
         return data_engine.get_quote(symbol)
     except Exception as e:
@@ -173,16 +288,15 @@ def get_quote(symbol: str = Query(default=DEFAULT_SYMBOL)):
 def get_chart_data(symbol: str = Query(default=DEFAULT_SYMBOL),
                    days: int = Query(default=60, ge=5, le=365)):
     try:
-        df = data_engine.get_ohlcv(symbol)
-        df_slice = df.tail(days)
+        df = data_engine.get_ohlcv(symbol).tail(days)
         return {
             "symbol": symbol,
-            "dates":  [str(d.date()) for d in df_slice.index],
-            "open":   df_slice["Open"].round(2).tolist(),
-            "high":   df_slice["High"].round(2).tolist(),
-            "low":    df_slice["Low"].round(2).tolist(),
-            "close":  df_slice["Close"].round(2).tolist(),
-            "volume": df_slice["Volume"].tolist(),
+            "dates":  [str(d.date()) for d in df.index],
+            "open":   df["Open"].round(2).tolist(),
+            "high":   df["High"].round(2).tolist(),
+            "low":    df["Low"].round(2).tolist(),
+            "close":  df["Close"].round(2).tolist(),
+            "volume": df["Volume"].tolist(),
             "source": "kite_live" if kite_auth.is_authenticated() else "dummy",
         }
     except Exception as e:
@@ -200,9 +314,9 @@ def get_order_book(symbol: str = Query(default=DEFAULT_SYMBOL)):
 def analyse(symbol: str = Query(default=DEFAULT_SYMBOL)):
     try:
         return _analyse(symbol)
-    except Exception as exc:
+    except Exception as e:
         logger.exception("Analysis failed for %s", symbol)
-        raise HTTPException(status_code=500, detail=str(exc))
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.get("/decision", tags=["analysis"])
@@ -217,9 +331,8 @@ def get_decision(symbol: str = Query(default=DEFAULT_SYMBOL)):
             "stop_loss":     a["risk"]["stop_loss"]["price"],
             "news_sentiment": a["features"]["model_details"]["sentiment"]["label"],
         }
-    except Exception as exc:
-        logger.exception("Decision failed for %s", symbol)
-        raise HTTPException(status_code=500, detail=str(exc))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.get("/risk", tags=["risk"])
@@ -227,39 +340,28 @@ def get_risk(symbol: str = Query(default=DEFAULT_SYMBOL)):
     try:
         a = _analyse(symbol)
         return {"symbol": symbol, **a["risk"]}
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 # ── Orders ─────────────────────────────────────────────────────────────────────
 
 @app.post("/order", tags=["execution"])
 def place_order(req: OrderRequest):
-    """
-    Place an order.
-    use_real=true → real Kite order (requires authentication).
-    use_real=false → paper trade simulation.
-    """
     if req.side not in ("BUY", "SELL"):
         raise HTTPException(status_code=400, detail="side must be BUY or SELL")
 
     price = data_engine.get_current_price(req.symbol)
 
-    # Real order via Kite
     if req.use_real:
         if not kite_auth.is_authenticated():
-            raise HTTPException(
-                status_code=401,
-                detail="Not authenticated. Open http://localhost:8000/kite/login first."
-            )
-        kite = kite_auth.get_kite()
+            raise HTTPException(status_code=401,
+                detail="Not authenticated. Visit http://localhost:8000/kite/login")
         from backend.data_engine.kite_provider import KiteDataProvider
-        provider = KiteDataProvider(kite)
+        provider = KiteDataProvider(kite_auth.get_kite())
         return provider.place_order(req.symbol, req.side, req.qty, req.order_type, req.price)
 
-    # Paper trade
-    position_inr = price * req.qty
-    return execution_engine.execute(req.symbol, req.side, price, position_inr)
+    return execution_engine.execute(req.symbol, req.side, price, price * req.qty)
 
 
 # ── Portfolio ──────────────────────────────────────────────────────────────────
@@ -290,8 +392,8 @@ def optimize_portfolio(
         dfs = {sym: data_engine.get_ohlcv(sym)["Close"] for sym in sym_list}
         returns_df = pd.DataFrame({sym: df.pct_change() for sym, df in dfs.items()}).dropna()
         return _opt(returns_df)
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.get("/monte-carlo", tags=["analysis"])
@@ -302,5 +404,4 @@ def run_monte_carlo(
 ):
     from backend.feature_engine.simulation import monte_carlo
     df = data_engine.get_ohlcv(symbol)
-    result = monte_carlo(df["Close"], n_sims=simulations, horizon=horizon)
-    return {"symbol": symbol, **result}
+    return {"symbol": symbol, **monte_carlo(df["Close"], n_sims=simulations, horizon=horizon)}
