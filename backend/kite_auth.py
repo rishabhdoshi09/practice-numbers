@@ -12,10 +12,9 @@ import logging
 from pathlib import Path
 from dotenv import load_dotenv, set_key
 
-load_dotenv()
-logger = logging.getLogger(__name__)
-
 ENV_FILE = Path(__file__).parent.parent / ".env"
+load_dotenv(dotenv_path=ENV_FILE, override=True)   # explicit path, overrides any stale env
+logger = logging.getLogger(__name__)
 
 API_KEY    = os.getenv("KITE_API_KEY", "")
 API_SECRET = os.getenv("KITE_API_SECRET", "")
