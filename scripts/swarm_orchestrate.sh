@@ -30,17 +30,16 @@ SYMBOLS=$(echo "$UNIVERSE" | python3 -c "import sys,json; d=json.load(sys.stdin)
 echo "✓ Universe: $TOTAL stocks"
 
 # 2. Split symbols into N buckets
-BUCKET_SYMBOLS=$(echo "$SYMBOLS" | python3 - <<'PYEOF'
+BUCKET_SYMBOLS=$(echo "$SYMBOLS" | python3 -c "
 import sys
 symbols = sys.stdin.read().strip().split(',')
-n = int(''"$WORKERS"'')
+n = $WORKERS
 size = (len(symbols) + n - 1) // n
 for i in range(n):
     chunk = symbols[i*size:(i+1)*size]
     if chunk:
         print(','.join(chunk))
-PYEOF
-)
+")
 
 # 3. Spawn one agent per bucket and assign scan task
 TASK_IDS=()
