@@ -526,6 +526,21 @@ async def run_investment_pipeline(
     }
 
 
+@app.get("/invest/scorecard/{symbol}", tags=["invest"])
+def get_scorecard(symbol: str):
+    """
+    Institutional risk scorecard — single ticker.
+    Returns full financial metrics, 3-component risk score (0-100),
+    quarterly table, price history, catalysts, risks, and final verdict.
+    """
+    from backend.scanner.scorecard import generate_scorecard
+    try:
+        return generate_scorecard(symbol)
+    except Exception as e:
+        logger.exception("Scorecard failed for %s", symbol)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.get("/invest/adversarial/{symbol}", tags=["invest"])
 def invest_adversarial(symbol: str):
     """Bull vs Bear debate for a single stock."""

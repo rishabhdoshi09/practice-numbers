@@ -15,6 +15,7 @@ import PortfolioPanel   from "./components/PortfolioPanel";
 import JarvisScan       from "./components/JarvisScan";
 import DailyReport      from "./components/DailyReport";
 import InvestPanel      from "./components/InvestPanel";
+import Scorecard        from "./components/Scorecard";
 import Loader           from "./components/Loader";
 import { fmtINR }       from "./utils/format";
 
@@ -27,10 +28,11 @@ const NAV = [
 ];
 
 export default function App() {
-  const [symbol,   setSymbol]   = useState("RELIANCE.NS");
-  const [advanced, setAdvanced] = useState(false);
-  const [detail,   setDetail]   = useState(false);
-  const [nav,      setNav]      = useState("single");
+  const [symbol,    setSymbol]    = useState("RELIANCE.NS");
+  const [advanced,  setAdvanced]  = useState(false);
+  const [detail,    setDetail]    = useState(false);
+  const [nav,       setNav]       = useState("single");
+  const [scorecard, setScorecard] = useState(false);
 
   const { decision, analysis, chart, loading, error, reload } = useAnalysis(symbol);
 
@@ -135,7 +137,15 @@ export default function App() {
                     </p>
                     <p className="text-3xl font-black text-slate-100">{fmtINR(price)}</p>
                   </div>
-                  <RiskBadge risk={riskLevel} />
+                  <div className="flex flex-col items-end gap-2">
+                    <RiskBadge risk={riskLevel} />
+                    <button
+                      onClick={() => setScorecard(true)}
+                      className="text-xs px-3 py-1.5 rounded-lg bg-sky-500/10 border border-sky-500/20 text-sky-400 hover:bg-sky-500/20 transition-all font-semibold"
+                    >
+                      📊 Scorecard
+                    </button>
+                  </div>
                 </div>
 
                 {/* BIG BUTTON */}
@@ -207,6 +217,11 @@ export default function App() {
           ))}
         </div>
       </nav>
+
+      {/* ── Scorecard modal ───────────────────────────────────────────────── */}
+      {scorecard && (
+        <Scorecard symbol={symbol} onClose={() => setScorecard(false)} />
+      )}
     </div>
   );
 }
