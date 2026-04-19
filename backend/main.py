@@ -269,6 +269,102 @@ def get_schedule():
     }
 
 
+# ── Full NSE universe scan ─────────────────────────────────────────────────────
+
+@app.get("/scan/full", tags=["jarvis"])
+async def run_full_scan(
+    workers:  int  = Query(default=8,   ge=1, le=20,  description="Parallel workers (sector buckets)"),
+    limit:    int  = Query(default=0,   ge=0,          description="Cap symbols (0 = all)"),
+    sector:   str  = Query(default="",                 description="Filter to one sector"),
+):
+    """
+    Scan the full NSE equity universe (~2000 stocks when Kite authenticated,
+    ~200 otherwise) using parallel sector-bucketed workers.
+
+    Each worker handles one sector bucket concurrently.
+    Results are pushed to all WebSocket clients on completion.
+    """
+    from backend.scanner.full_universe import get_full_universe, get_symbols_only
+    from backend.scanner.swarm_scan    import run_swarm_scan
+
+    kite = kite_auth.get_kite() if kite_auth.is_authenticated() else None
+    universe = get_full_universe(kite=kite)
+
+    if sector:
+        universe = [u for u in universe if u["sector"].lower() == sector.lower()]
+    if limit and limit > 0:
+        universe = universe[:limit]
+
+    progress: list[str] = []
+
+    def on_progress(done, total, label):
+        progress.append(f"{done}/{total} [{label}]")
+        logger.info("Full scan progress: %d/%d", done, total)
+
+    try:
+        result = run_swarm_scan(
+            universe, data_engine, feature_engine,
+            decision_engine, risk_engine,
+            n_workers=workers, on_progress=on_progress,
+        )
+        await ws_manager.broadcast({"type": "full_scan_result", **result})
+        return result
+    except Exception as e:
+        logger.exception("Full scan failed")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/scan/universe", tags=["jarvis"])
+def get_universe_info():
+    """Return the current equity universe (no analysis — just symbol list with metadata)."""
+    from backend.scanner.full_universe import get_full_universe, bucket_by_sector
+
+    kite     = kite_auth.get_kite() if kite_auth.is_authenticated() else None
+    universe = get_full_universe(kite=kite)
+    buckets  = bucket_by_sector(universe, n_workers=8)
+
+    sector_counts: dict[str, int] = {}
+    for u in universe:
+        sector_counts[u["sector"]] = sector_counts.get(u["sector"], 0) + 1
+
+    return {
+        "total":         len(universe),
+        "source":        "kite" if kite else "fallback_list",
+        "sectors":       sector_counts,
+        "bucket_sizes":  [len(b) for b in buckets],
+        "symbols":       [u["symbol"] for u in universe],
+    }
+
+
+@app.post("/scan/bucket", tags=["jarvis"])
+async def scan_single_bucket(
+    symbols: str = Query(description="Comma-separated symbols for this bucket"),
+):
+    """
+    Scan a specific list of symbols.
+    Designed for claude-flow agent invocation — each agent calls this endpoint
+    for its assigned sector bucket and the coordinator aggregates results.
+    """
+    from backend.scanner.full_universe import get_full_universe
+    from backend.scanner.swarm_scan    import scan_bucket_by_symbols
+
+    kite     = kite_auth.get_kite() if kite_auth.is_authenticated() else None
+    universe = get_full_universe(kite=kite)
+    meta     = {u["symbol"]: u for u in universe}
+
+    sym_list = [s.strip() for s in symbols.split(",") if s.strip()]
+    if not sym_list:
+        raise HTTPException(status_code=400, detail="No symbols provided")
+
+    try:
+        results = scan_bucket_by_symbols(
+            sym_list, meta, data_engine, feature_engine, decision_engine, risk_engine,
+        )
+        return {"symbols_scanned": len(results), "results": results}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 # ── Market data ────────────────────────────────────────────────────────────────
 
 @app.get("/symbols", tags=["market"])
