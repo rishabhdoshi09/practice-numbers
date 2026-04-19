@@ -208,10 +208,15 @@ async def kite_callback(request_token: str):
 
 @app.get("/kite/status", tags=["auth"])
 def kite_status():
+    key = kite_auth._api_key()
     return {
         "authenticated": kite_auth.is_authenticated(),
-        "data_source": "kite_live" if kite_auth.is_authenticated() else "yfinance/dummy",
-        "login_url": "http://localhost:8000/kite/login",
+        "data_source":   "kite_live" if kite_auth.is_authenticated() else "yfinance/dummy",
+        "login_url":     "http://localhost:8000/kite/login",
+        "api_key_set":   bool(key),
+        "api_key_hint":  key[:4] + "****" if key else "MISSING",
+        "env_file":      str(kite_auth.ENV_FILE),
+        "env_exists":    kite_auth.ENV_FILE.exists(),
     }
 
 
