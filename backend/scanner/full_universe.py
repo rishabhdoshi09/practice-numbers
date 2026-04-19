@@ -210,15 +210,19 @@ def get_full_universe(kite=None) -> list[dict]:
                 load_instruments, _meta_map,
             )
             tokens = load_instruments(kite)
-            if tokens:
+            if len(tokens) > 100:
                 nifty_meta = {s["symbol"]: s for s in NIFTY50 + NIFTY_MIDCAP_SYMBOLS}
                 result: list[dict] = []
-                for sym in sorted(tokens.keys()):
+                # NSE first, then BSE
+                nse_syms = sorted(s for s in tokens if s.endswith(".NS"))
+                bse_syms = sorted(s for s in tokens if s.endswith(".BO"))
+                for sym in nse_syms + bse_syms:
                     meta   = nifty_meta.get(sym)
-                    name   = meta["name"]   if meta else _meta_map.get(sym, {}).get("name", sym.replace(".NS", ""))
+                    raw    = _meta_map.get(sym, {})
+                    name   = meta["name"]   if meta else raw.get("name", sym.split(".")[0])
                     sector = meta["sector"] if meta else "Others"
                     result.append({"symbol": sym, "name": name, "sector": sector})
-                logger.info("Full universe: %d NSE equities (Kite)", len(result))
+                logger.info("Full universe: %d NSE+BSE equities (Kite)", len(result))
                 return result
         except Exception as e:
             logger.warning("Could not load Kite universe: %s — trying NSE public", e)

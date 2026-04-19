@@ -32,79 +32,130 @@ def _kite_symbol(symbol: str) -> str:
     return symbol.replace(".NS", "").replace(".BSE", "")
 
 
-def _cache_fresh() -> bool:
-    """Return True if the cache file exists and is from today."""
-    if not os.path.exists(_CACHE_FILE):
+_BSE_CACHE_FILE = os.path.normpath(
+    os.path.join(os.path.dirname(__file__), "..", "..", ".kite_bse_instruments.json")
+)
+_bse_token_map: dict[str, int] = {}
+
+
+def _cache_fresh(path: str, min_entries: int = 100) -> bool:
+    """True only if cache file exists, is from today, and has ≥ min_entries."""
+    if not os.path.exists(path):
         return False
-    mtime = datetime.fromtimestamp(os.path.getmtime(_CACHE_FILE))
-    return mtime.date() == datetime.today().date()
+    if datetime.fromtimestamp(os.path.getmtime(path)).date() != datetime.today().date():
+        return False
+    try:
+        with open(path) as f:
+            data = json.load(f)
+        return len(data) >= min_entries
+    except Exception:
+        return False
 
 
 def load_instruments(kite, force: bool = False) -> dict[str, int]:
     """
-    Build the full NSE equity token map from Kite's instrument master.
+    Build the full NSE + BSE equity token map from Kite's instrument master.
 
-    Results are cached to .kite_instruments.json and refreshed once per day.
-    Returns mapping: "SYMBOL.NS" → instrument_token (int)
+    Caches to disk (refreshed daily or when stale/empty).
+    Returns mapping: "SYMBOL.NS" / "SYMBOL.BO" → instrument_token (int)
     """
-    global _token_map, _meta_map
+    global _token_map, _meta_map, _bse_token_map
 
     with _map_lock:
         if _token_map and not force:
             return _token_map
 
-        # Try disk cache first
-        if _cache_fresh() and not force:
+        # ── NSE instruments ──────────────────────────────────────────────────
+        if _cache_fresh(_CACHE_FILE) and not force:
             try:
                 with open(_CACHE_FILE) as f:
                     cached = json.load(f)
                 _token_map = {k: v["token"] for k, v in cached.items()}
                 _meta_map  = cached
-                logger.info("Loaded %d instruments from cache", len(_token_map))
-                return _token_map
+                logger.info("Loaded %d NSE instruments from cache", len(_token_map))
             except Exception as e:
-                logger.warning("Cache read failed: %s — refetching", e)
+                logger.warning("NSE cache read failed: %s — refetching", e)
+                _token_map = {}
 
-        # Fetch from Kite API
-        try:
-            instruments = kite.instruments("NSE")
-            logger.info("Fetched %d raw NSE instruments from Kite", len(instruments))
-        except Exception as e:
-            logger.error("kite.instruments() failed: %s", e)
-            return _token_map  # return whatever we have
+        if not _token_map or force:
+            try:
+                instruments = kite.instruments("NSE")
+                logger.info("Fetched %d raw NSE instruments from Kite", len(instruments))
+                new_tokens: dict[str, int]  = {}
+                new_meta:   dict[str, dict] = {}
+                for inst in instruments:
+                    if inst.get("instrument_type") != "EQ":
+                        continue
+                    ts    = inst.get("tradingsymbol", "")
+                    token = inst.get("instrument_token")
+                    if not ts or not token:
+                        continue
+                    sym = f"{ts}.NS"
+                    new_tokens[sym] = token
+                    new_meta[sym]   = {
+                        "token":     token,
+                        "name":      inst.get("name", ts),
+                        "lot_size":  inst.get("lot_size", 1),
+                        "tick_size": inst.get("tick_size", 0.05),
+                        "exchange":  "NSE",
+                    }
+                _token_map = new_tokens
+                _meta_map  = new_meta
+                try:
+                    with open(_CACHE_FILE, "w") as f:
+                        json.dump(new_meta, f)
+                    logger.info("Cached %d NSE EQ instruments", len(new_tokens))
+                except Exception as e:
+                    logger.warning("NSE cache write failed: %s", e)
+            except Exception as e:
+                logger.error("kite.instruments('NSE') failed: %s", e)
 
-        new_tokens: dict[str, int]  = {}
-        new_meta:   dict[str, dict] = {}
+        # ── BSE instruments ──────────────────────────────────────────────────
+        if _cache_fresh(_BSE_CACHE_FILE) and not force:
+            try:
+                with open(_BSE_CACHE_FILE) as f:
+                    cached_bse = json.load(f)
+                _bse_token_map = {k: v["token"] for k, v in cached_bse.items()}
+                _meta_map.update(cached_bse)
+                logger.info("Loaded %d BSE instruments from cache", len(_bse_token_map))
+            except Exception:
+                _bse_token_map = {}
 
-        for inst in instruments:
-            if inst.get("instrument_type") != "EQ":
-                continue
-            ts     = inst.get("tradingsymbol", "")
-            token  = inst.get("instrument_token")
-            name   = inst.get("name", ts)
-            if not ts or not token:
-                continue
-            sym = f"{ts}.NS"
-            new_tokens[sym] = token
-            new_meta[sym] = {
-                "token":     token,
-                "name":      name,
-                "lot_size":  inst.get("lot_size", 1),
-                "tick_size": inst.get("tick_size", 0.05),
-            }
+        if not _bse_token_map or force:
+            try:
+                bse_instruments = kite.instruments("BSE")
+                logger.info("Fetched %d raw BSE instruments from Kite", len(bse_instruments))
+                new_bse: dict[str, int]  = {}
+                new_bse_meta: dict[str, dict] = {}
+                for inst in bse_instruments:
+                    if inst.get("instrument_type") != "EQ":
+                        continue
+                    ts    = inst.get("tradingsymbol", "")
+                    token = inst.get("instrument_token")
+                    if not ts or not token:
+                        continue
+                    sym = f"{ts}.BO"
+                    new_bse[sym] = token
+                    new_bse_meta[sym] = {
+                        "token":     token,
+                        "name":      inst.get("name", ts),
+                        "lot_size":  inst.get("lot_size", 1),
+                        "tick_size": inst.get("tick_size", 0.05),
+                        "exchange":  "BSE",
+                    }
+                _bse_token_map = new_bse
+                _meta_map.update(new_bse_meta)
+                try:
+                    with open(_BSE_CACHE_FILE, "w") as f:
+                        json.dump(new_bse_meta, f)
+                    logger.info("Cached %d BSE EQ instruments", len(new_bse))
+                except Exception as e:
+                    logger.warning("BSE cache write failed: %s", e)
+            except Exception as e:
+                logger.error("kite.instruments('BSE') failed: %s", e)
 
-        _token_map = new_tokens
-        _meta_map  = new_meta
-
-        # Persist to disk
-        try:
-            with open(_CACHE_FILE, "w") as f:
-                json.dump(new_meta, f)
-            logger.info("Cached %d NSE EQ instruments to disk", len(new_tokens))
-        except Exception as e:
-            logger.warning("Cache write failed: %s", e)
-
-        return _token_map
+        # Merged map: NSE first, BSE fills any gaps
+        return {**_bse_token_map, **_token_map}
 
 
 def get_all_equity_symbols() -> list[str]:

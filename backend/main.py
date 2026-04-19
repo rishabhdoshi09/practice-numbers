@@ -206,6 +206,21 @@ async def kite_callback(request_token: str):
         raise HTTPException(status_code=400, detail=str(e))
 
 
+@app.get("/kite/refresh-instruments", tags=["auth"])
+def kite_refresh_instruments():
+    """Force-reload NSE+BSE instrument master from Kite (clears disk cache)."""
+    kite = kite_auth.get_kite()
+    if not kite:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    from backend.data_engine.kite_provider import load_instruments, _CACHE_FILE, _BSE_CACHE_FILE
+    import os
+    for f in (_CACHE_FILE, _BSE_CACHE_FILE):
+        try: os.remove(f)
+        except FileNotFoundError: pass
+    tokens = load_instruments(kite, force=True)
+    return {"nse_bse_total": len(tokens), "status": "refreshed"}
+
+
 @app.get("/kite/status", tags=["auth"])
 def kite_status():
     key = kite_auth._api_key()
