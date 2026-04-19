@@ -1,7 +1,9 @@
 """
-Generates realistic dummy OHLCV data using Geometric Brownian Motion so the
-system works fully without any API keys.  Values are calibrated to approximate
-Indian large-cap equity behaviour (NSE).
+TEST-ONLY: GBM-based synthetic OHLCV generator.
+
+Used exclusively in unit tests (backend/tests/).
+NOT imported anywhere in production code — all production paths use
+yFinance or Zerodha Kite Connect for real market data.
 """
 import numpy as np
 import pandas as pd

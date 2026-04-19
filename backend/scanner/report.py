@@ -50,11 +50,11 @@ def generate_full_report(scan_result: dict) -> dict:
         if "_signals" not in s:
             s["_signals"] = _infer_signals(s)
 
-    # Parallel-fetch market data (best-effort; fallback to dummy if offline)
-    global_indices = _safe(fetch_global_indices)
-    commodities    = _safe(fetch_commodities)
-    sectors        = _safe(fetch_sectors)
-    nifty_ema      = _safe(fetch_nifty_ema_data)
+    # Fetch real market data (best-effort; skip sections if offline)
+    global_indices = _safe(fetch_global_indices, default={}) or {}
+    commodities    = _safe(fetch_commodities,    default={}) or {}
+    sectors        = _safe(fetch_sectors,        default=[]) or []
+    nifty_ema      = _safe(fetch_nifty_ema_data, default={}) or {}
 
     # ── Section builds ─────────────────────────────────────────────────────────
     exec_summary  = _build_executive_summary(all_stks, global_indices, sectors, now)
@@ -339,38 +339,52 @@ def _build_heatmap(sectors, stocks) -> dict:
 # ══════════════════════════════════════════════════════════════════════════════
 
 def _build_news(stocks) -> list[dict]:
-    """
-    Pull news from the scan stocks' top movers.
-    In Phase 1, returns synthesised summary from sentiment model.
-    Phase 2: wire NewsAPI / NSE announcements.
-    """
+    """Fetch real news from yFinance for top-confidence stocks."""
+    from backend.feature_engine.sentiment import score_headline
+
     news_items = []
-    for s in sorted(stocks, key=lambda x: -x["confidence"])[:8]:
-        sig       = s.get("_signals", {})
-        sent      = sig.get("sentiment", 0)
-        label     = "positive" if sent > 0.1 else ("negative" if sent < -0.1 else "neutral")
-        icon      = "▲" if label == "positive" else ("▼" if label == "negative" else "—")
-        sector    = s.get("sector", "Market")
-        name      = s["name"]
-        action    = s.get("action", "HOLD")
+    top_stocks = sorted(stocks, key=lambda x: -x["confidence"])[:10]
 
-        if action == "BUY":
-            headline = f"{name} sees strong institutional interest; analysts maintain positive outlook"
-        elif action == "SELL":
-            headline = f"{name} faces selling pressure; near-term outlook cautious"
-        else:
-            headline = f"{name} in consolidation phase — market awaiting fresh catalyst"
+    for s in top_stocks:
+        for item in _fetch_yf_news(s["symbol"])[:2]:
+            headline = item["headline"]
+            score    = score_headline(headline)
+            label    = "positive" if score > 0.1 else ("negative" if score < -0.1 else "neutral")
+            news_items.append({
+                "icon":            "▲" if label == "positive" else ("▼" if label == "negative" else "—"),
+                "symbol":          s["symbol"],
+                "name":            s["name"],
+                "sector":          s.get("sector", "Market"),
+                "headline":        headline,
+                "source":          item.get("source", ""),
+                "url":             item.get("url", ""),
+                "sentiment":       label,
+                "sentiment_score": round(score, 3),
+            })
+        if len(news_items) >= 12:
+            break
 
-        news_items.append({
-            "icon":      icon,
-            "symbol":    s["symbol"],
-            "name":      name,
-            "sector":    sector,
-            "headline":  headline,
-            "sentiment": label,
-            "sentiment_score": round(sent, 3),
-        })
     return news_items
+
+
+def _fetch_yf_news(symbol: str) -> list[dict]:
+    try:
+        import yfinance as yf
+        raw = yf.Ticker(symbol).news or []
+        result = []
+        for item in raw[:4]:
+            title = item.get("title", "")
+            if title:
+                result.append({
+                    "headline":  title,
+                    "source":    item.get("publisher", ""),
+                    "url":       item.get("link", ""),
+                    "published": item.get("providerPublishTime", 0),
+                })
+        return result
+    except Exception as e:
+        logger.debug("yF news failed %s: %s", symbol, e)
+        return []
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -438,9 +452,9 @@ def _infer_signals(stock: dict) -> dict:
     }
 
 
-def _safe(fn):
+def _safe(fn, default=None):
     try:
         return fn()
     except Exception as e:
-        logger.warning("Market data fetch failed: %s", e)
-        return {} if not isinstance(fn(), list) else []
+        logger.warning("Market data fetch failed (%s): %s", getattr(fn, "__name__", "?"), e)
+        return default
