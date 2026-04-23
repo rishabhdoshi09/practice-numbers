@@ -1,22 +1,28 @@
 import os
+import time
 from typing import Any, Optional
 
 from langchain_openai import ChatOpenAI
+from openai import BadRequestError
 
 from .base_client import BaseLLMClient, normalize_content
 from .validators import validate_model
 
 
 class NormalizedChatOpenAI(ChatOpenAI):
-    """ChatOpenAI with normalized content output.
-
-    The Responses API returns content as a list of typed blocks
-    (reasoning, text, etc.). This normalizes to string for consistent
-    downstream handling.
-    """
+    """ChatOpenAI with normalized content output and retry on tool_use_failed."""
 
     def invoke(self, input, config=None, **kwargs):
-        return normalize_content(super().invoke(input, config, **kwargs))
+        for attempt in range(3):
+            try:
+                return normalize_content(super().invoke(input, config, **kwargs))
+            except BadRequestError as exc:
+                body = exc.body if hasattr(exc, "body") else {}
+                code = body.get("error", {}).get("code", "") if isinstance(body, dict) else ""
+                if code == "tool_use_failed" and attempt < 2:
+                    time.sleep(2 ** attempt)
+                    continue
+                raise
 
 # Kwargs forwarded from user config to ChatOpenAI
 _PASSTHROUGH_KWARGS = (
