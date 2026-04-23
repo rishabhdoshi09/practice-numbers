@@ -10,14 +10,24 @@ from .validators import validate_model
 
 
 class NormalizedChatOpenAI(ChatOpenAI):
-    """ChatOpenAI with normalized content output and retry on tool_use_failed."""
+    """ChatOpenAI with normalized content output, retry on rate limits and tool failures."""
 
     def invoke(self, input, config=None, **kwargs):
-        for attempt in range(3):
+        for attempt in range(5):
             try:
                 return normalize_content(super().invoke(input, config, **kwargs))
             except Exception as exc:
-                if "tool_use_failed" in str(exc) and attempt < 2:
+                err = str(exc)
+                if "rate_limit_exceeded" in err or "429" in err:
+                    # Parse suggested wait time from error, default to 5s
+                    wait = 5
+                    import re
+                    m = re.search(r"try again in (\d+(?:\.\d+)?)s", err)
+                    if m:
+                        wait = float(m.group(1)) + 1
+                    time.sleep(wait)
+                    continue
+                if "tool_use_failed" in err and attempt < 4:
                     time.sleep(2 ** attempt)
                     continue
                 raise
