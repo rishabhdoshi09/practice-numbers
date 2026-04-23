@@ -7,6 +7,7 @@ Output format matches yfinance_news.py exactly so all agents work unchanged.
 Env var required:
     NEWSDATA_API_KEY   (free at https://newsdata.io — 200 credits/day, no card)
 
+Note: Free tier uses /latest endpoint — from_date/to_date require a paid plan.
 Falls back to yfinance if key is absent.
 """
 
@@ -18,7 +19,6 @@ import requests
 
 logger = logging.getLogger(__name__)
 
-_BASE_URL = "https://newsdata.io/api/1/news"
 _LATEST_URL = "https://newsdata.io/api/1/latest"
 
 
@@ -51,30 +51,29 @@ def get_news_newsdata(
     plain = _plain_symbol(ticker)
 
     try:
+        # Free tier: /latest endpoint — from_date/to_date are paid-only params
         params = {
             "apikey":   key,
             "q":        plain,
             "language": "en",
             "country":  "in",
             "category": "business",
-            "from_date": start_date,
-            "to_date":   end_date,
         }
-        resp = requests.get(_BASE_URL, params=params, timeout=10)
+        resp = requests.get(_LATEST_URL, params=params, timeout=10)
         resp.raise_for_status()
         data = resp.json()
 
         articles = data.get("results", [])
         if not articles:
-            return f"No news found for {plain} between {start_date} and {end_date}"
+            return f"No news found for {plain}"
 
         news_str = ""
         for art in articles[:15]:
-            title     = art.get("title",       "No title")
-            desc      = art.get("description", "") or ""
-            source    = art.get("source_name", "Unknown")
-            link      = art.get("link",        "")
-            pub_date  = art.get("pubDate",     "")
+            title    = art.get("title",       "No title")
+            desc     = art.get("description", "") or ""
+            source   = art.get("source_name", "Unknown")
+            link     = art.get("link",        "")
+            pub_date = art.get("pubDate",     "")
 
             news_str += f"### {title} (source: {source})\n"
             if desc:
@@ -85,7 +84,7 @@ def get_news_newsdata(
                 news_str += f"Published: {pub_date}\n"
             news_str += "\n"
 
-        return f"## {plain} News (via NewsData.io), {start_date} to {end_date}:\n\n{news_str}"
+        return f"## {plain} News (via NewsData.io), latest:\n\n{news_str}"
 
     except requests.RequestException as exc:
         logger.warning("NewsData.io stock news failed for %s: %s — falling back", plain, exc)
@@ -110,11 +109,6 @@ def get_global_news_newsdata(
         from .yfinance_news import get_global_news_yfinance
         return get_global_news_yfinance(curr_date, look_back_days, limit)
 
-    curr_dt   = datetime.strptime(curr_date, "%Y-%m-%d")
-    start_dt  = curr_dt - timedelta(days=look_back_days)
-    start_date = start_dt.strftime("%Y-%m-%d")
-
-    # Queries covering Indian + global macro
     queries = [
         "Nifty Sensex stock market India",
         "RBI interest rate inflation India",
@@ -128,16 +122,15 @@ def get_global_news_newsdata(
         for query in queries:
             if len(all_articles) >= limit:
                 break
+            # Free tier: /latest endpoint without date filtering
             params = {
-                "apikey":    key,
-                "q":         query,
-                "language":  "en",
-                "from_date": start_date,
-                "to_date":   curr_date,
-                "category":  "business",
+                "apikey":   key,
+                "q":        query,
+                "language": "en",
+                "category": "business",
             }
             try:
-                resp = requests.get(_BASE_URL, params=params, timeout=10)
+                resp = requests.get(_LATEST_URL, params=params, timeout=10)
                 resp.raise_for_status()
                 results = resp.json().get("results", [])
                 for art in results:
@@ -168,7 +161,7 @@ def get_global_news_newsdata(
                 news_str += f"Published: {pub_date}\n"
             news_str += "\n"
 
-        return f"## Global Market News (via NewsData.io), {start_date} to {curr_date}:\n\n{news_str}"
+        return f"## Global Market News (via NewsData.io), latest:\n\n{news_str}"
 
     except Exception as exc:
         logger.warning("NewsData.io global news failed: %s — falling back", exc)

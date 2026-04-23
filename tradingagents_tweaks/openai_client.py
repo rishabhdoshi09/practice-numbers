@@ -16,10 +16,8 @@ class NormalizedChatOpenAI(ChatOpenAI):
         for attempt in range(3):
             try:
                 return normalize_content(super().invoke(input, config, **kwargs))
-            except BadRequestError as exc:
-                body = exc.body if hasattr(exc, "body") else {}
-                code = body.get("error", {}).get("code", "") if isinstance(body, dict) else ""
-                if code == "tool_use_failed" and attempt < 2:
+            except Exception as exc:
+                if "tool_use_failed" in str(exc) and attempt < 2:
                     time.sleep(2 ** attempt)
                     continue
                 raise
