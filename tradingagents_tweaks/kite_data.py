@@ -129,6 +129,9 @@ def get_kite_data(
     if df.empty:
         return f"No data found for '{plain_sym}' between {start_date} and {end_date}"
 
+    # Cap to last 15 trading days — keeps Groq free-tier token usage under limit
+    df = df.tail(15).reset_index(drop=True)
+
     df["Open"]  = df["Open"].round(2)
     df["High"]  = df["High"].round(2)
     df["Low"]   = df["Low"].round(2)
@@ -153,6 +156,8 @@ def get_kite_indicators_window(
     Compute technical indicators on Kite OHLCV data using stockstats.
     Matches the interface of get_stock_stats_indicators_window (yfinance version).
     """
+    # Cap look_back to 10 days — keeps Groq free-tier token usage under limit
+    look_back_days = min(look_back_days, 10)
     end_dt   = datetime.strptime(curr_date, "%Y-%m-%d")
     # Fetch extra history so indicators have enough warm-up data
     start_dt = end_dt - timedelta(days=look_back_days + 300)

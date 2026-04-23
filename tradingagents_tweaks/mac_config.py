@@ -16,7 +16,7 @@ MAC_CONFIG = DEFAULT_CONFIG.copy()
 # ── LLM: Groq (free, no GPU needed) ──────────────────────────────────────────
 MAC_CONFIG["llm_provider"]    = "groq"
 MAC_CONFIG["deep_think_llm"]  = "llama-3.3-70b-versatile"
-MAC_CONFIG["quick_think_llm"] = "llama-3.1-8b-instant"
+MAC_CONFIG["quick_think_llm"] = "llama-3.3-70b-versatile"
 
 # ── RAM saver: debate rounds zero (8GB Mac ke liye critical) ──────────────────
 MAC_CONFIG["max_debate_rounds"]       = 0
