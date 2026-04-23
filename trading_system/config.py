@@ -3,15 +3,21 @@ Central configuration for the trading system.
 All tuneable parameters live here — never scatter magic numbers through modules.
 """
 
+import os
 from dataclasses import dataclass, field
 from typing import List
 
 
+def _default_symbols() -> List[str]:
+    # Kite uses plain NSE symbols; yfinance needs .NS suffix
+    if os.environ.get("KITE_API_KEY") and os.environ.get("KITE_ACCESS_TOKEN"):
+        return ["RELIANCE", "TCS", "INFY", "HDFCBANK", "ICICIBANK"]
+    return ["RELIANCE.NS", "TCS.NS", "INFY.NS", "HDFCBANK.NS", "ICICIBANK.NS"]
+
+
 @dataclass
 class DataConfig:
-    symbols: List[str] = field(default_factory=lambda: [
-        "RELIANCE.NS", "TCS.NS", "INFY.NS", "HDFCBANK.NS", "ICICIBANK.NS",
-    ])
+    symbols: List[str] = field(default_factory=_default_symbols)
     start_date: str = "2019-01-01"
     end_date: str = "2024-12-31"
     interval: str = "1d"
