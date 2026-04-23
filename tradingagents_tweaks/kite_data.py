@@ -198,7 +198,8 @@ def get_kite_indicators_window(
         "Date": "date", "Open": "open", "High": "high",
         "Low": "low", "Close": "close", "Volume": "volume",
     })
-    df_ss = df_ss.set_index("date")
+    df_ss.index = pd.to_datetime(df_ss.index)
+    df_ss = df_ss.set_index(pd.DatetimeIndex(df_ss.index))
     wrapped = stockstats_wrap(df_ss)
 
     try:
@@ -206,17 +207,18 @@ def get_kite_indicators_window(
     except Exception as exc:
         return f"Error computing {indicator} for {symbol}: {exc}"
 
-    wrapped = wrapped.reset_index()
-    wrapped["date"] = pd.to_datetime(wrapped["date"]).dt.normalize()
-
-    # Filter to look-back window
-    mask = (wrapped["date"] >= pd.Timestamp(before_dt)) & (wrapped["date"] <= pd.Timestamp(end_dt))
-    window = wrapped[mask].sort_values("date", ascending=False)
+    # Iterate over DatetimeIndex directly — avoids reset_index column name issues
+    start_ts = pd.Timestamp(before_dt)
+    end_ts   = pd.Timestamp(end_dt)
 
     ind_string = ""
-    for _, row in window.iterrows():
-        val = row.get(indicator, "N/A")
-        ind_string += f"{row['date'].strftime('%Y-%m-%d')}: {val}\n"
+    for ts in sorted(wrapped.index, reverse=True):
+        ts = pd.Timestamp(ts)
+        if start_ts <= ts <= end_ts:
+            val = wrapped.loc[ts, indicator] if indicator in wrapped.columns else "N/A"
+            if pd.isna(val):
+                val = "N/A"
+            ind_string += f"{ts.strftime('%Y-%m-%d')}: {val}\n"
 
     if not ind_string:
         ind_string = "N/A: No trading data in this window\n"
