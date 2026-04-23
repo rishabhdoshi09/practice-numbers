@@ -14,3 +14,4 @@ outputs/
 *.csv
 *.png
 .DS_Store
+TradingAgents/
