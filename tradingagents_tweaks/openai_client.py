@@ -1,9 +1,9 @@
 import os
+import re
 import time
 from typing import Any, Optional
 
 from langchain_openai import ChatOpenAI
-from openai import BadRequestError
 
 from .base_client import BaseLLMClient, normalize_content
 from .validators import validate_model
@@ -13,24 +13,25 @@ class NormalizedChatOpenAI(ChatOpenAI):
     """ChatOpenAI with normalized content output, retry on rate limits and tool failures."""
 
     def invoke(self, input, config=None, **kwargs):
-        for attempt in range(5):
+        last_exc: Exception = RuntimeError("invoke never attempted")
+        for attempt in range(10):
             try:
                 return normalize_content(super().invoke(input, config, **kwargs))
             except Exception as exc:
+                last_exc = exc
                 err = str(exc)
                 if "rate_limit_exceeded" in err or "429" in err:
-                    # Parse suggested wait time from error, default to 5s
                     wait = 5
-                    import re
                     m = re.search(r"try again in (\d+(?:\.\d+)?)s", err)
                     if m:
                         wait = float(m.group(1)) + 1
                     time.sleep(wait)
                     continue
-                if "tool_use_failed" in err and attempt < 4:
-                    time.sleep(2 ** attempt)
+                if "tool_use_failed" in err:
+                    time.sleep(2 ** min(attempt, 4))
                     continue
                 raise
+        raise last_exc
 
 # Kwargs forwarded from user config to ChatOpenAI
 _PASSTHROUGH_KWARGS = (
