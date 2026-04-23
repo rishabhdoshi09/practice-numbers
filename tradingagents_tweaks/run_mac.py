@@ -49,7 +49,9 @@ def analyze(symbol: str, date: str):
     print(f"  Data    : Kite (price) · NewsData.io (news)")
     print(f"{'═'*54}\n")
 
-    ta = TradingAgentsGraph(debug=False, config=MAC_CONFIG)
+    # Only 2 analysts for speed on Groq free tier (market + news)
+    ta = TradingAgentsGraph(selected_analysts=["market", "news"],
+                            debug=False, config=MAC_CONFIG)
     _, decision = ta.propagate(symbol, date)
 
     print(f"\n{'═'*54}")

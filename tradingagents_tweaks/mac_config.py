@@ -18,9 +18,9 @@ MAC_CONFIG["llm_provider"]    = "groq"
 MAC_CONFIG["deep_think_llm"]  = "llama-3.3-70b-versatile"
 MAC_CONFIG["quick_think_llm"] = "llama-3.3-70b-versatile"
 
-# ── RAM saver: debate rounds zero (8GB Mac ke liye critical) ──────────────────
+# ── Speed saver: skip all debate rounds for Groq free tier ───────────────────
 MAC_CONFIG["max_debate_rounds"]       = 0
-MAC_CONFIG["max_risk_discuss_rounds"] = 1
+MAC_CONFIG["max_risk_discuss_rounds"] = 0
 
 # ── Data: Kite for OHLCV + indicators, yfinance for fundamentals/news ─────────
 MAC_CONFIG["data_vendors"] = {
