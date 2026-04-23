@@ -27,5 +27,5 @@ MAC_CONFIG["data_vendors"] = {
     "core_stock_apis":      "kite",      # OHLCV from Kite (NSE direct)
     "technical_indicators": "kite",      # Indicators computed on Kite data
     "fundamental_data":     "yfinance",  # Kite has no fundamentals API
-    "news_data":            "yfinance",  # Kite has no news API
+    "news_data":            "newsdata",  # NewsData.io — best Indian coverage
 }

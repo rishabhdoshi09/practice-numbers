@@ -23,6 +23,7 @@ from .alpha_vantage import (
     get_global_news as get_alpha_vantage_global_news,
 )
 from .kite_data import get_kite_data, get_kite_indicators_window
+from .newsdata_news import get_news_newsdata, get_global_news_newsdata
 from .alpha_vantage_common import AlphaVantageRateLimitError
 
 # Configuration and routing logic
@@ -59,6 +60,7 @@ TOOLS_CATEGORIES = {
 
 VENDOR_LIST = [
     "kite",
+    "newsdata",
     "yfinance",
     "alpha_vantage",
 ]
@@ -99,18 +101,21 @@ VENDOR_METHODS = {
         "alpha_vantage": get_alpha_vantage_income_statement,
         "yfinance":      get_yfinance_income_statement,
     },
-    # news_data — Kite has no news API, yfinance used
+    # news_data — NewsData.io primary, yfinance fallback
     "get_news": {
-        "kite":          get_news_yfinance,
+        "newsdata":      get_news_newsdata,
+        "kite":          get_news_newsdata,
         "alpha_vantage": get_alpha_vantage_news,
         "yfinance":      get_news_yfinance,
     },
     "get_global_news": {
-        "kite":          get_global_news_yfinance,
+        "newsdata":      get_global_news_newsdata,
+        "kite":          get_global_news_newsdata,
         "yfinance":      get_global_news_yfinance,
         "alpha_vantage": get_alpha_vantage_global_news,
     },
     "get_insider_transactions": {
+        "newsdata":      get_yfinance_insider_transactions,
         "kite":          get_yfinance_insider_transactions,
         "alpha_vantage": get_alpha_vantage_insider_transactions,
         "yfinance":      get_yfinance_insider_transactions,
